@@ -36,7 +36,7 @@ router.post("/process-file", async (req, res) => {
         .on("data", (row) => {
           if (row[emailColumn]) emails.push(row[emailColumn]);
         })
-        .on("end", () => processEmails(emails, res));
+        .on("end", () => processEmails(fileId, emailColumn, emails, res));
     } else if (file.contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
       const workbook = XLSX.readFile(tempFilePath);
       const sheetName = workbook.SheetNames[0];
@@ -46,7 +46,7 @@ router.post("/process-file", async (req, res) => {
         if (row[emailColumn]) emails.push(row[emailColumn]);
       });
 
-      processEmails(emails, res);
+      processEmails(fileId, emailColumn, emails, res);
     } else {
       res.status(400).json({ error: "Unsupported file format" });
     }
@@ -60,7 +60,7 @@ router.post("/process-file", async (req, res) => {
 });
 
 // Function to process emails and call Python script
-function processEmails(emails, res) {
+async function processEmails(fileId, emailColumn, emails, res) {
   const pythonProcess = spawn("python", ["validate_emails.py", JSON.stringify(emails)]);
 
   let pythonOutput = "";
@@ -77,7 +77,7 @@ function processEmails(emails, res) {
       try {
         const results = JSON.parse(pythonOutput);
 
-        // Save each email validation result to MongoDB
+        // Format validation results
         const validationRecords = results.map((result) => ({
           email: result.email,
           isValid: result.is_valid_format && result.domain_exists,
@@ -85,8 +85,17 @@ function processEmails(emails, res) {
           deliverabilityScore: result.domain_exists ? 100 : 0,
         }));
 
-        await EmailValidation.insertMany(validationRecords);
-        res.json({ status: "success", savedRecords: validationRecords });
+        // Save validation results to MongoDB with auto-generated `_id` and `fileId` reference
+        const document = {
+          fileId, // Reference to the file
+          emailColumn,
+          processedAt: new Date(),
+          validations: validationRecords,
+        };
+
+        const savedDocument = await EmailValidation.create(document);
+
+        res.json({ status: "success", savedDocument });
       } catch (err) {
         console.error(err);
         res.status(500).json({ error: "Failed to save validation results" });
