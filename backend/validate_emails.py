@@ -34,5 +34,5 @@ if __name__ == "__main__":
         input_emails = json.loads(sys.argv[1])
         results = validate_emails(input_emails)
         print(json.dumps(results))
-    except Exception as e:
+    except Exception as e
         print(json.dumps({"error": str(e)}))

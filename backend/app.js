@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
+const cors = require('cors');
 const fileRoutes = require('./routes/fileRoutes');
 const emailValidationRoutes = require("./routes/emailValidationRoute");
 
@@ -8,6 +9,9 @@ const app = express();
 
 // Middleware
 app.use(express.json());
+
+// Enable CORS for all origins
+app.use(cors());
 
 // Routes
 app.use('/api/files', fileRoutes);
