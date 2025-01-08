@@ -49,25 +49,28 @@ export class EmailValidationComponent {
 
   constructor(private http: HttpClient) {}
 
+  ngOnInit() {
+    this.loadFiles();
+  }
+
+  loadFiles() {
+    this.http.get<EmailList[]>('http://localhost:5000/api/files/list')
+      .subscribe({
+        next: (files) => {
+          this.lists = files;
+        },
+        error: (error) => {
+          console.error('Error loading files:', error);
+          this.errorMessage = 'Failed to load files.';
+        }
+      });
+  }
+
   onFileSelected(event: any): void {
     const file: File = event.target.files[0];
     if (!file) return;
 
-    // Clear previous error message
     this.errorMessage = '';
-
-    // Check file type
-    const allowedTypes = [
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/csv'
-    ];
-    
-    if (!allowedTypes.includes(file.type)) {
-      this.errorMessage = 'Please upload only Excel or CSV files.';
-      return;
-    }
-
     const formData = new FormData();
     formData.append('file', file);
 
@@ -76,13 +79,8 @@ export class EmailValidationComponent {
         next: (response) => {
           console.log('Upload response:', response);
           if (response.fileId) {
-            this.lists.push({
-              fileName: file.name,
-              fileId: response.fileId,
-              emailsReady: 0, // Will be updated after processing
-              status: 'uploaded',
-              validationResults: []
-            });
+            // Instead of manually pushing, reload the entire list
+            this.loadFiles();
           }
         },
         error: (error: HttpErrorResponse) => {
