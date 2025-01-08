@@ -25,6 +25,8 @@
     <!-- File Boxes -->
     <div class="lists">
       <div *ngFor="let list of lists" class="list-box">
+          <!-- Add delete button -->
+        <button class="delete-button" (click)="deleteFile(list.fileId)">×</button>
         <div class="list-box__header">
           <h3 class="list-box__title">{{ list.fileName }}</h3>
           <p class="list-box__source">📂 My Computer</p>

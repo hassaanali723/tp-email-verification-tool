@@ -138,6 +138,23 @@ export class EmailValidationComponent {
     // showing the detailed validation results
   }
 
+  // Add this method to your component class
+deleteFile(fileId: string): void {
+  if (confirm('Are you sure you want to delete this file?')) {
+    this.http.delete(`http://localhost:5000/api/files/${fileId}`)
+      .subscribe({
+        next: () => {
+          // Remove file from local list
+          this.lists = this.lists.filter(list => list.fileId !== fileId);
+        },
+        error: (error: HttpErrorResponse) => {
+          console.error('Error deleting file:', error);
+          this.errorMessage = 'Failed to delete file. Please try again.';
+        }
+      });
+  }
+}
+
   calculateDeliverabilityStats(validations: EmailValidation[]) {
     const stats = {
       totalEmails: validations.length,

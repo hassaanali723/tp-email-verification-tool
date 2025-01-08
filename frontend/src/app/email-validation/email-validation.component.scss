@@ -171,6 +171,40 @@ $primary-dark: darken($primary-color, 10%);
   }
 }
 
+.list-box {
+  position: relative; // Add this to position the delete button
+
+  .delete-button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #ddd;
+    color: #666;
+    font-size: 18px;
+    display: none; // Hidden by default
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      background: #ff4444;
+      color: white;
+      border-color: #ff4444;
+    }
+  }
+
+  &:hover {
+    .delete-button {
+      display: flex; // Show on hover
+    }
+  }
+}
+
 // Responsive adjustments
 @media (max-width: 768px) {
   .header {
