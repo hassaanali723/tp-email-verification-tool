@@ -64,5 +64,31 @@ router.get('/list', async (req, res) => {
   }
 });
 
+// Add this DELETE endpoint to your fileRoutes.js
+router.delete('/:id', async (req, res) => {
+  try {
+      const fileId = req.params.id;
+
+      // Delete the file
+      await File.findByIdAndDelete(fileId);
+
+      // Delete associated validation results
+      await EmailValidation.findOneAndDelete({ fileId });
+
+      // Remove the actual file from uploads if it exists
+      // You might want to adjust the path based on your file storage logic
+      const file = await File.findById(fileId);
+      if (file?.path) {
+          fs.unlink(file.path, (err) => {
+              if (err) console.error('Error deleting file from disk:', err);
+          });
+      }
+
+      res.json({ message: 'File deleted successfully' });
+  } catch (error) {
+      console.error('Error deleting file:', error);
+      res.status(500).json({ error: 'Failed to delete file' });
+  }
+});
 
 module.exports = router;
