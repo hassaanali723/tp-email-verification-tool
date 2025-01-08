@@ -106,4 +106,58 @@ async function processEmails(fileId, emailColumn, emails, res) {
   });
 }
 
+// New GET endpoint to fetch results by fileId
+router.get("/results/:fileId", async (req, res) => {
+  try {
+      const { fileId } = req.params;
+
+      // Validate fileId
+      if (!fileId) {
+          return res.status(400).json({ error: "File ID is required" });
+      }
+
+      // Find the file first
+      const file = await File.findById(fileId);
+      if (!file) {
+          return res.status(404).json({ error: "File not found" });
+      }
+
+      // Find the validation results for this file
+      const validationResults = await EmailValidation.findOne({ fileId });
+      if (!validationResults) {
+          return res.status(404).json({ error: "No validation results found for this file" });
+      }
+
+      // Calculate statistics
+      const validations = validationResults.validations;
+      const totalEmails = validations.length;
+      
+      // Basic statistics
+      const stats = {
+          totalEmails,
+          deliverable: validations.filter(v => v.isValid && v.deliverabilityScore >= 90).length,
+          undeliverable: validations.filter(v => !v.isValid).length,
+          risky: validations.filter(v => v.isValid && v.deliverabilityScore < 90).length,
+          unknown: 0, // You can define your own criteria for unknown
+      };
+
+      // Prepare response
+      const response = {
+          status: "success",
+          fileName: file.fileName,
+          processedAt: validationResults.processedAt,
+          emailColumn: validationResults.emailColumn,
+          fileId: validationResults.fileId,
+          stats,
+          validations: validationResults.validations,
+      };
+
+      res.json(response);
+  } catch (error) {
+      console.error('Error fetching results:', error);
+      res.status(500).json({ error: "Error fetching validation results" });
+  }
+});
+
+
 module.exports = router;

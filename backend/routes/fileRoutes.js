@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const File = require('../models/File');
-
+const EmailValidation = require("../models/EmailValidation");
 const router = express.Router();
 
 // Multer setup (temporary folder)
@@ -34,5 +34,35 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     res.status(500).send('Internal Server Error');
   }
 });
+
+// Add this new endpoint to fileRoutes.js
+router.get('/list', async (req, res) => {
+  try {
+      // Fetch all files with their validation status
+      const files = await File.find().sort({ createdAt: -1 });
+      
+      // Get validation results for all files
+      const filesWithStatus = await Promise.all(files.map(async (file) => {
+          const validation = await EmailValidation.findOne({ fileId: file._id });
+          
+          return {
+              fileName: file.fileName,
+              fileId: file._id,
+              emailsReady: validation?.validations?.length || 0,
+              status: validation ? 'verified' : 'uploaded',
+              validationResults: validation?.validations || [],
+              deliverableRate: validation ? (validation.validations.filter(v => 
+                  v.isValid && v.deliverabilityScore >= 90
+              ).length / validation.validations.length * 100) : 0
+          };
+      }));
+
+      res.json(filesWithStatus);
+  } catch (error) {
+      console.error('Error fetching files:', error);
+      res.status(500).json({ error: 'Failed to fetch files' });
+  }
+});
+
 
 module.exports = router;
