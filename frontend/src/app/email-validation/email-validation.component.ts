@@ -1,5 +1,6 @@
 // email-validation.component.ts
 import { Component } from '@angular/core';
+import { Router, RouterOutlet, RouterModule } from '@angular/router';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 
@@ -26,8 +27,9 @@ interface EmailList {
   fileId: string;
   emailsReady: number;
   status: 'uploaded' | 'verified';
-  validationResults: EmailValidation[];
+  validationResults: any[];
   deliverableRate?: number;
+  isProcessing?: boolean;  // Add this
 }
 
 interface UploadResponse {
@@ -38,7 +40,7 @@ interface UploadResponse {
 @Component({
   selector: 'app-email-validation',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule,RouterOutlet, RouterModule],
   templateUrl: './email-validation.component.html',
   styleUrls: ['./email-validation.component.scss']
 })
@@ -47,7 +49,7 @@ export class EmailValidationComponent {
   errorMessage: string = '';
   isProcessing: boolean = false;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient,  private router: Router) {}
 
   ngOnInit() {
     this.loadFiles();
@@ -91,16 +93,22 @@ export class EmailValidationComponent {
   }
 
   verifyFile(list: EmailList): void {
-    if (this.isProcessing) return;
-
-    this.isProcessing = true;
-    this.errorMessage = '';
-
+    if (list.isProcessing) return;
+  
+    // Update the processing state for this specific file
+    const index = this.lists.findIndex(item => item.fileId === list.fileId);
+    if (index !== -1) {
+      this.lists[index] = {
+        ...list,
+        isProcessing: true
+      };
+    }
+  
     const payload = { 
       fileId: list.fileId, 
       emailColumn: "Email" 
     };
-
+  
     this.http.post<ProcessFileResponse>('http://localhost:5000/api/emails/process-file', payload)
       .subscribe({
         next: (response) => {
@@ -112,30 +120,35 @@ export class EmailValidationComponent {
               v => v.isValid && v.deliverabilityScore >= 90
             ).length;
             const deliverableRate = (validEmails / response.savedDocument.validations.length) * 100;
-
+  
             this.lists[index] = {
               ...list,
               status: 'verified',
               validationResults: response.savedDocument.validations,
               deliverableRate: Math.round(deliverableRate),
-              emailsReady: response.savedDocument.validations.length
+              emailsReady: response.savedDocument.validations.length,
+              isProcessing: false  // Reset processing state
             };
           }
-          this.isProcessing = false;
         },
         error: (error: HttpErrorResponse) => {
           console.error('Error verifying file:', error);
           this.errorMessage = 'Failed to verify file. Please try again.';
-          this.isProcessing = false;
+          
+          // Reset the processing state for this file on error
+          const index = this.lists.findIndex(item => item.fileId === list.fileId);
+          if (index !== -1) {
+            this.lists[index] = {
+              ...list,
+              isProcessing: false
+            };
+          }
         }
       });
   }
 
   viewResults(list: EmailList): void {
-    console.log('Validation Results:', list.validationResults);
-    // Implement results view logic here
-    // You might want to navigate to a new route or open a modal
-    // showing the detailed validation results
+    this.router.navigate(['/results', list.fileId]);
   }
 
   // Add this method to your component class
@@ -145,7 +158,8 @@ deleteFile(fileId: string): void {
       .subscribe({
         next: () => {
           // Remove file from local list
-          this.lists = this.lists.filter(list => list.fileId !== fileId);
+         // this.lists = this.lists.filter(list => list.fileId !== fileId);
+         this.loadFiles();
         },
         error: (error: HttpErrorResponse) => {
           console.error('Error deleting file:', error);

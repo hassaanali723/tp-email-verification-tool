@@ -1,11 +1,13 @@
 import { Component } from '@angular/core';
-import { EmailValidationComponent } from './email-validation/email-validation.component';
+import { RouterLink, RouterOutlet } from '@angular/router';
+import { CommonModule } from '@angular/common';
 
 @Component({
   selector: 'app-root',
-  templateUrl: './app.component.html',
-  styleUrls: ['./app.component.scss'],
   standalone: true,
-  imports: [EmailValidationComponent], // Import the EmailValidationComponent here
+  imports: [RouterLink, RouterOutlet, CommonModule],
+  templateUrl: './app.component.html'
 })
-export class AppComponent {}
+export class AppComponent {
+  title = 'email-verification-tool';
+}
