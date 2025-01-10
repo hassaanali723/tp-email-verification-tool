@@ -48,13 +48,13 @@
         <!-- Buttons -->
         <div class="list-box__actions">
           <button
-            *ngIf="list.status === 'uploaded'"
-            class="btn btn-success"
-            (click)="verifyFile(list)"
-            [disabled]="isProcessing"
-          >
-            {{ isProcessing ? 'Verifying...' : 'Verify' }}
-          </button>
+              *ngIf="list.status === 'uploaded'"
+              class="btn btn-success"
+              (click)="verifyFile(list)"
+              [disabled]="list.isProcessing"
+            >
+              {{ list.isProcessing ? 'Verifying...' : 'Verify' }}
+            </button>
           <button
             *ngIf="list.status === 'verified'"
             class="btn btn-primary"
