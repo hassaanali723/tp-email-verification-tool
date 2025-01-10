@@ -1,0 +1,132 @@
+<div class="results-container">
+    <!-- Header Info -->
+    <div class="file-info">
+      <div class="info-item">
+        <div class="label">NAME</div>
+        <div class="value">{{ fileName }}</div>
+      </div>
+      <div class="info-item">
+        <div class="label">EMAILS</div>
+        <div class="value">{{ totalEmails }}</div>
+      </div>
+      <div class="info-item">
+        <div class="label">UPLOADED</div>
+        <div class="value">{{ uploadDate | date:'MM/dd/yyyy' }}</div>
+      </div>
+    </div>
+  
+    <!-- Main Results Chart -->
+    <div class="results-chart-card">
+      <div class="chart-container">
+        <!-- Main Donut Chart -->
+        <div class="main-chart">
+          <div class="donut-chart">
+            <div class="chart-center">
+              <div class="percentage">{{ stats.deliverable.percentage | number:'1.1' }}%</div>
+              <div class="label">Deliverable</div>
+            </div>
+          </div>
+        </div>
+  
+        <!-- Stats Legend -->
+        <div class="stats-legend">
+          <div class="legend-item deliverable">
+            <span class="status-dot"></span>
+            <span class="status-label">Deliverable</span>
+            <span class="count">{{ stats.deliverable.count }}</span>
+            <span class="percentage">{{ stats.deliverable.percentage | number:'1.1' }}%</span>
+          </div>
+          <div class="legend-item undeliverable">
+            <span class="status-dot"></span>
+            <span class="status-label">Undeliverable</span>
+            <span class="count">{{ stats.undeliverable.count }}</span>
+            <span class="percentage">{{ stats.undeliverable.percentage | number:'1.1' }}%</span>
+          </div>
+          <div class="legend-item risky">
+            <span class="status-dot"></span>
+            <span class="status-label">Risky</span>
+            <span class="count">{{ stats.risky.count }}</span>
+            <span class="percentage">{{ stats.risky.percentage | number:'1.1' }}%</span>
+          </div>
+          <div class="legend-item unknown">
+            <span class="status-dot"></span>
+            <span class="status-label">Unknown</span>
+            <span class="count">{{ stats.unknown.count }}</span>
+            <span class="percentage">{{ stats.unknown.percentage | number:'1.1' }}%</span>
+          </div>
+          <div class="legend-item duplicate">
+            <span class="status-dot"></span>
+            <span class="status-label">Duplicate</span>
+            <span class="count">{{ stats.duplicate.count }}</span>
+            <span class="percentage">{{ stats.duplicate.percentage | number:'1.1' }}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  
+    <!-- Detailed Status Cards -->
+    <div class="status-cards">
+      <!-- Undeliverable Card -->
+      <div class="status-card">
+        <div class="card-header undeliverable">
+          <span class="icon">×</span>
+          <span class="title">Undeliverable</span>
+        </div>
+        <div class="donut-chart small">
+          <div class="chart-center">
+            <div class="percentage">{{ stats.undeliverable.percentage | number:'1.1' }}%</div>
+            <div class="count">{{ stats.undeliverable.count }}</div>
+          </div>
+        </div>
+        <div class="subcategories">
+          <div class="subcategory" *ngFor="let sub of undeliverableSubcategories">
+            <span class="name">{{ sub.name }}</span>
+            <span class="value">{{ sub.count }}</span>
+            <span class="percentage">{{ (sub.count / totalEmails) * 100 | number:'1.1' }}%</span>
+          </div>
+        </div>
+      </div>
+  
+      <!-- Risky Card -->
+      <div class="status-card">
+        <div class="card-header risky">
+          <span class="icon">!</span>
+          <span class="title">Risky</span>
+        </div>
+        <div class="donut-chart small">
+          <div class="chart-center">
+            <div class="percentage">{{ stats.risky.percentage | number:'1.1' }}%</div>
+            <div class="count">{{ stats.risky.count }}</div>
+          </div>
+        </div>
+        <div class="subcategories">
+          <div class="subcategory" *ngFor="let sub of riskySubcategories">
+            <span class="name">{{ sub.name }}</span>
+            <span class="value">{{ sub.count }}</span>
+            <span class="percentage">{{ (sub.count / totalEmails) * 100 | number:'1.1' }}%</span>
+          </div>
+        </div>
+      </div>
+  
+      <!-- Unknown Card -->
+      <div class="status-card">
+        <div class="card-header unknown">
+          <span class="icon">?</span>
+          <span class="title">Unknown</span>
+        </div>
+        <div class="donut-chart small">
+          <div class="chart-center">
+            <div class="percentage">{{ stats.unknown.percentage | number:'1.1' }}%</div>
+            <div class="count">{{ stats.unknown.count }}</div>
+          </div>
+        </div>
+        <div class="subcategories">
+          <div class="subcategory" *ngFor="let sub of unknownSubcategories">
+            <span class="name">{{ sub.name }}</span>
+            <span class="value">{{ sub.count }}</span>
+            <span class="percentage">{{ (sub.count / totalEmails) * 100 | number:'1.1' }}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
