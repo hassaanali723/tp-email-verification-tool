@@ -46,7 +46,7 @@ router.get('/list', async (req, res) => {
           const validation = await EmailValidation.findOne({ fileId: file._id });
           
           return {
-              fileName: file.fileName,
+              fileName: file.filename,
               fileId: file._id,
               emailsReady: validation?.validations?.length || 0,
               status: validation ? 'verified' : 'uploaded',
