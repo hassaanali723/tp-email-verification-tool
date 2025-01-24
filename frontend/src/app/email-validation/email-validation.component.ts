@@ -148,7 +148,14 @@ export class EmailValidationComponent {
   }
 
   viewResults(list: EmailList): void {
-    this.router.navigate(['/results', list.fileId]);
+    // Prevent default navigation behavior
+    event?.preventDefault();
+    
+    // Navigate programmatically
+    this.router.navigate(['email-validation/results', list.fileId], {
+      skipLocationChange: false,
+      replaceUrl: false
+    });
   }
 
   // Add this method to your component class

@@ -58,7 +58,7 @@
           <button
             *ngIf="list.status === 'verified'"
             class="btn btn-primary"
-            (click)="viewResults(list)"
+            (click)="viewResults(list); $event.preventDefault()"
           >
             View Results →
           </button>

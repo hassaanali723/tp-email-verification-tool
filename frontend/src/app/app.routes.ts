@@ -5,6 +5,6 @@ import { EmailResultsComponent } from './email-results/email-results.component';
 export const routes: Routes = [
   { path: '', redirectTo: '/email-validation', pathMatch: 'full' },
   { path: 'email-validation', component: EmailValidationComponent },
-  { path: 'results/:id', component: EmailResultsComponent },
+  { path: 'email-validation/results/:id', component: EmailResultsComponent },
 //   { path: '**', redirectTo: '/email-validation' } // Wildcard route for 404
 ];
