@@ -144,7 +144,7 @@ router.get("/results/:fileId", async (req, res) => {
       // Prepare response
       const response = {
           status: "success",
-          fileName: file.fileName,
+          fileName: file.filename,
           processedAt: validationResults.processedAt,
           emailColumn: validationResults.emailColumn,
           fileId: validationResults.fileId,
