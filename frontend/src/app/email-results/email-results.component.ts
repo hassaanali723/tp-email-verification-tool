@@ -81,45 +81,62 @@ export class EmailResultsComponent implements OnInit {
         next: (response) => {
           this.fileName = response.fileName;
           this.uploadDate = response.processedAt;
-          this.totalEmails = response.validations.length;
-
-          // Calculate stats
-          const validations = response.validations;
-          
-          // Reset counts
-          this.resetStats();
-
-          // Process each validation
-          validations.forEach((validation: any) => {
-            if (validation.isValid && validation.deliverabilityScore >= 90) {
-              this.stats.deliverable.count++;
-            } else if (!validation.isValid) {
-              this.stats.undeliverable.count++;
-              
-              // Count subcategories based on validation properties
-              if (validation.invalidReason === 'invalid_format') {
-                this.undeliverableSubcategories[0].count++;
-              } else if (validation.invalidReason === 'invalid_domain') {
-                this.undeliverableSubcategories[1].count++;
-              }
-              // Add more subcategory counting logic as needed
-            } else if (validation.deliverabilityScore < 90) {
-              this.stats.risky.count++;
+          this.totalEmails = response.stats.totalEmails;
+  
+          // Update main stats
+          this.stats = {
+            deliverable: {
+              count: response.stats.deliverable,
+              percentage: parseFloat(response.stats.percentages.deliverable)
+            },
+            undeliverable: {
+              count: response.stats.undeliverable,
+              percentage: parseFloat(response.stats.percentages.undeliverable)
+            },
+            risky: {
+              count: response.stats.risky,
+              percentage: parseFloat(response.stats.percentages.risky)
+            },
+            unknown: {
+              count: response.stats.unknown,
+              percentage: parseFloat(response.stats.percentages.unknown)
+            },
+            duplicate: {
+              count: response.stats.duplicate,
+              percentage: parseFloat(response.stats.percentages.duplicate)
             }
-          });
-
-          // Calculate percentages
-          this.calculatePercentages();
-
-          // Set CSS variables for the donut chart
+          };
+  
+          // Update subcategories
+          this.undeliverableSubcategories = [
+            { name: 'Invalid Email', count: response.stats.details.undeliverable.invalidEmail },
+            { name: 'Invalid Domain', count: response.stats.details.undeliverable.invalidDomain },
+            { name: 'Rejected Email', count: response.stats.details.undeliverable.rejectedEmail },
+            { name: 'Invalid SMTP', count: response.stats.details.undeliverable.invalidSMTP }
+          ];
+  
+          this.riskySubcategories = [
+            { name: 'Low Quality', count: response.stats.details.risky.lowQuality },
+            { name: 'Low Deliverability', count: response.stats.details.risky.lowDeliverability }
+          ];
+  
+          this.unknownSubcategories = [
+            { name: 'No Connect', count: response.stats.details.unknown.noConnect },
+            { name: 'Timeout', count: response.stats.details.unknown.timeout },
+            { name: 'Unavailable SMTP', count: response.stats.details.unknown.unavailableSMTP },
+            { name: 'Unexpected Error', count: response.stats.details.unknown.unexpectedError }
+          ];
+  
+          // Set chart variables for visualization
           this.setChartVariables();
         },
         error: (error) => {
           console.error('Error loading results:', error);
         }
       });
-  }
 
+      
+  }
   private resetStats(): void {
     Object.keys(this.stats).forEach(key => {
       this.stats[key as keyof Stats].count = 0;

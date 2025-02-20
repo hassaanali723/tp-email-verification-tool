@@ -36,7 +36,7 @@
           <div class="progress-circle">
             <span *ngIf="list.status === 'uploaded'">{{ list.emailsReady }}</span>
             <span *ngIf="list.status === 'verified'">
-              {{ list.deliverableRate || 100 }}%
+              {{ list.deliverableRate || 100 | number:'1.0-0' }}%
             </span>
           </div>
           <p class="list-box__status">

@@ -61,6 +61,7 @@ router.post("/process-file", async (req, res) => {
 
 // Function to process emails and call Python script
 async function processEmails(fileId, emailColumn, emails, res) {
+  console.log(JSON.stringify(emails));
   const pythonProcess = spawn("python", ["validate_emails.py", JSON.stringify(emails)]);
 
   let pythonOutput = "";
@@ -76,25 +77,51 @@ async function processEmails(fileId, emailColumn, emails, res) {
     if (code === 0) {
       try {
         const results = JSON.parse(pythonOutput);
-
-        // Format validation results
+        console.log(results);
+        
+        // Format validation results to match the schema
         const validationRecords = results.map((result) => ({
           email: result.email,
-          isValid: result.is_valid_format && result.domain_exists,
-          riskLevel: result.is_valid_format ? "low" : "high",
-          deliverabilityScore: result.domain_exists ? 100 : 0,
+          isValid: result.isValid,
+          riskLevel: result.riskLevel,
+          deliverabilityScore: result.deliverabilityScore,
+          details: {
+            general: {
+              fullName: result.details.general.fullName,
+              gender: result.details.general.gender,
+              state: result.details.general.state,
+              reason: result.details.general.reason,
+              domain: result.details.general.domain
+            },
+            attributes: {
+              free: result.details.attributes.free,
+              role: result.details.attributes.role,
+              disposable: result.details.attributes.disposable,
+              acceptAll: result.details.attributes.acceptAll,
+              tag: result.details.attributes.tag,
+              numericalChars: result.details.attributes.numericalChars,
+              alphabeticalChars: result.details.attributes.alphabeticalChars,
+              unicodeSymbols: result.details.attributes.unicodeSymbols,
+              mailboxFull: result.details.attributes.mailboxFull,
+              noReply: result.details.attributes.noReply
+            },
+            mailServer: {
+              smtpProvider: result.details.mailServer.smtpProvider,
+              mxRecord: result.details.mailServer.mxRecord,
+              implicitMXRecord: result.details.mailServer.implicitMXRecord
+            }
+          }
         }));
 
-        // Save validation results to MongoDB with auto-generated `_id` and `fileId` reference
+        // Save validation results to MongoDB
         const document = {
-          fileId, // Reference to the file
+          fileId,
           emailColumn,
           processedAt: new Date(),
-          validations: validationRecords,
+          validations: validationRecords
         };
 
         const savedDocument = await EmailValidation.create(document);
-
         res.json({ status: "success", savedDocument });
       } catch (err) {
         console.error(err);
@@ -109,53 +136,91 @@ async function processEmails(fileId, emailColumn, emails, res) {
 // New GET endpoint to fetch results by fileId
 router.get("/results/:fileId", async (req, res) => {
   try {
-      const { fileId } = req.params;
+    const { fileId } = req.params;
 
-      // Validate fileId
-      if (!fileId) {
-          return res.status(400).json({ error: "File ID is required" });
-      }
+    if (!fileId) {
+      return res.status(400).json({ error: "File ID is required" });
+    }
 
-      // Find the file first
-      const file = await File.findById(fileId);
-      if (!file) {
-          return res.status(404).json({ error: "File not found" });
-      }
+    // Find the file first
+    const file = await File.findById(fileId);
+    if (!file) {
+      return res.status(404).json({ error: "File not found" });
+    }
 
-      // Find the validation results for this file
-      const validationResults = await EmailValidation.findOne({ fileId });
-      if (!validationResults) {
-          return res.status(404).json({ error: "No validation results found for this file" });
-      }
+    // Find the validation results for this file
+    const validationResults = await EmailValidation.findOne({ fileId });
+    if (!validationResults) {
+      return res.status(404).json({ error: "No validation results found for this file" });
+    }
 
-      // Calculate statistics
-      const validations = validationResults.validations;
-      const totalEmails = validations.length;
-      
-      // Basic statistics
-      const stats = {
-          totalEmails,
-          deliverable: validations.filter(v => v.isValid && v.deliverabilityScore >= 90).length,
-          undeliverable: validations.filter(v => !v.isValid).length,
-          risky: validations.filter(v => v.isValid && v.deliverabilityScore < 90).length,
-          unknown: 0, // You can define your own criteria for unknown
-      };
+    const validations = validationResults.validations;
+    const totalEmails = validations.length;
 
-      // Prepare response
-      const response = {
-          status: "success",
-          fileName: file.filename,
-          processedAt: validationResults.processedAt,
-          emailColumn: validationResults.emailColumn,
-          fileId: validationResults.fileId,
-          stats,
-          validations: validationResults.validations,
-      };
+    // Calculate statistics based on general.state
+    const stats = {
+      totalEmails,
+      deliverable: validations.filter(v => v.details.general.state === "Deliverable").length,
+      undeliverable: validations.filter(v => v.details.general.state === "Undeliverable").length,
+      risky: validations.filter(v => v.details.general.state === "Risky").length,
+      unknown: validations.filter(v => v.details.general.state === "Unknown").length,
+      duplicate: validations.filter(v => v.details.general.state === "Duplicate").length
+    };
 
-      res.json(response);
+    // Calculate percentages
+    const percentages = {
+      deliverable: ((stats.deliverable / totalEmails) * 100).toFixed(1),
+      undeliverable: ((stats.undeliverable / totalEmails) * 100).toFixed(1),
+      risky: ((stats.risky / totalEmails) * 100).toFixed(1),
+      unknown: ((stats.unknown / totalEmails) * 100).toFixed(1),
+      duplicate: ((stats.duplicate / totalEmails) * 100).toFixed(1)
+    };
+
+    // Get detailed subcategories for each state
+    const undeliverableDetails = {
+      invalidEmail: validations.filter(v => v.details.general.reason === "Invalid Email Format").length,
+      invalidDomain: validations.filter(v => v.details.general.reason === "Invalid Domain").length,
+      rejectedEmail: validations.filter(v => v.details.general.reason === "Mailbox Not Found").length,
+      invalidSMTP: validations.filter(v => v.details.general.reason === "Invalid Mailbox").length
+    };
+
+    const riskyDetails = {
+      lowQuality: validations.filter(v => v.details.attributes.disposable).length,
+      lowDeliverability: validations.filter(v => v.details.attributes.mailboxFull).length
+    };
+
+    const unknownDetails = {
+      noConnect: validations.filter(v => v.details.general.reason === "Server Temporary Error").length,
+      timeout: validations.filter(v => v.details.general.reason?.includes("timeout")).length,
+      unavailableSMTP: validations.filter(v => v.details.general.reason?.includes("SMTP unavailable")).length,
+      unexpectedError: validations.filter(v => v.details.general.state === "Unknown" && 
+        !v.details.general.reason?.includes("timeout") && 
+        !v.details.general.reason?.includes("SMTP unavailable")).length
+    };
+
+    // Prepare response
+    const response = {
+      status: "success",
+      fileName: file.filename,
+      processedAt: validationResults.processedAt,
+      emailColumn: validationResults.emailColumn,
+      fileId: validationResults.fileId,
+      stats: {
+        ...stats,
+        percentages,
+        details: {
+          undeliverable: undeliverableDetails,
+          risky: riskyDetails,
+          unknown: unknownDetails
+        }
+      },
+      validations: validationResults.validations
+    };
+
+    res.json(response);
   } catch (error) {
-      console.error('Error fetching results:', error);
-      res.status(500).json({ error: "Error fetching validation results" });
+    console.error('Error fetching results:', error);
+    res.status(500).json({ error: "Error fetching validation results" });
   }
 });
 
