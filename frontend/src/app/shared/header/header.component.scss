@@ -1,0 +1,84 @@
+// src/app/shared/layout/header/header.component.scss
+$primary-color: #295C5C;
+$secondary-color: #E9BB71;
+
+.header {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.5rem;
+  background-color: white;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+
+  .header-left {
+    .page-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #1f2937;
+    }
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+
+    .credits {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+
+      .credits-label {
+        font-size: 0.875rem;
+        color: #6b7280;
+      }
+
+      .credits-amount {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: #1f2937;
+      }
+    }
+
+    .buy-credits-btn {
+      padding: 0.5rem 1rem;
+      background-color: $primary-color;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.3s ease;
+
+      &:hover {
+        background-color: darken($primary-color, 5%);
+        transform: translateY(-1px);
+      }
+
+      &:active {
+        transform: translateY(0);
+      }
+    }
+
+    .user-avatar {
+      width: 32px;
+      height: 32px;
+      background-color: #e5e7eb;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 500;
+      color: #4b5563;
+      cursor: pointer;
+      transition: all 0.3s ease;
+
+      &:hover {
+        background-color: darken(#e5e7eb, 5%);
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+// src/app/shared/layout/layout.component.scss
+$primary-color: #295C5C;
+$secondary-color: #E9BB71;
+
+.layout-container {
+  display: flex;
+  min-height: 100vh;
+  background-color: #f9fafb;
+
+  .main-content {
+    flex: 1;
+    margin-left: 260px; // Should match sidebar width
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+
+    .content-area {
+      flex: 1;
+      padding: 1.5rem;
+      overflow-y: auto;
+    }
+  }
+}
+
+// Add some global styles to ensure proper layout
+:host {
+  display: block;
+  height: 100vh;
+}
