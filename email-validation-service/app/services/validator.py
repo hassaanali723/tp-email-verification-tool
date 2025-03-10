@@ -22,6 +22,12 @@ from ..models.validation import (
 from ..config import settings
 from .dns_validator import DNSValidator
 from .circuit_breaker import CircuitBreaker
+from ..utils.validation_constants import (
+    FREE_EMAIL_PROVIDERS,
+    ROLE_PREFIXES,
+    DISPOSABLE_DOMAINS,
+    SMTP_PROVIDERS
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,34 +35,35 @@ logger = logging.getLogger(__name__)
 
 class EmailValidator:
     def __init__(self):
-        # Common free email providers
-        self.free_email_providers = {
-            'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com',
-            'icloud.com', 'protonmail.com', 'zoho.com', 'yandex.com'
-        }
+        # Use constants from validation_constants module
+        self.free_email_providers = FREE_EMAIL_PROVIDERS
+        self.role_prefixes = ROLE_PREFIXES
+        self.disposable_domains = DISPOSABLE_DOMAINS
+        self.smtp_providers = SMTP_PROVIDERS
         
-        # Common role-based email prefixes
-        self.role_prefixes = {
-            'admin', 'administrator', 'support', 'help', 'info', 'contact',
-            'sales', 'marketing', 'billing', 'accounts', 'abuse', 'postmaster'
-        }
+        # Initialize Redis client for circuit breaker
+        redis_client = redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            password=settings.REDIS_PASSWORD,
+            db=settings.REDIS_DB,
+            decode_responses=True
+        )
         
-        # Common disposable email domains
-        self.disposable_domains = {
-            'tempmail.com', 'throwawaymail.com', 'mailinator.com',
-            'tempmail.net', 'disposablemail.com'
-        }
-
-        # SMTP provider patterns
-        self.smtp_providers = {
-            'google': ['google', 'gmail'],
-            'microsoft': ['outlook', 'hotmail', 'microsoft'],
-            'yahoo': ['yahoo'],
-            'aol': ['aol'],
-            'proton': ['proton'],
-            'zoho': ['zoho'],
-            'yandex': ['yandex']
-        }
+        # Initialize circuit breaker
+        self.circuit_breaker = CircuitBreaker(redis_client)
+        
+        # Initialize DNS validator for fallback
+        self.dns_validator = DNSValidator()
+        
+        # Blacklist services
+        self.blacklist_services = [
+            'zen.spamhaus.org',
+            'bl.spamcop.net',
+            'dnsbl.sorbs.net',
+            'spam.abuse.ch',
+            'cbl.abuseat.org'
+        ]
 
         # Connection pool for SMTP
         self._smtp_pool = {}

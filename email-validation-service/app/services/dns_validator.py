@@ -13,6 +13,14 @@ from ..models.validation import (
     BlacklistInfo
 )
 from ..config import settings
+from ..utils.validation_constants import (
+    FREE_EMAIL_PROVIDERS,
+    ROLE_PREFIXES,
+    DISPOSABLE_DOMAINS,
+    EXAMPLE_DOMAINS,
+    SMTP_PROVIDERS,
+    COMMON_CATCHALL_PROVIDERS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,54 +36,13 @@ class DNSValidator:
         self.resolver.timeout = settings.DNS_TIMEOUT
         self.resolver.lifetime = settings.DNS_TIMEOUT
 
-        # Common free email providers
-        self.free_email_providers = {
-            'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com',
-            'icloud.com', 'protonmail.com', 'zoho.com', 'yandex.com'
-        }
-        
-        # Common role-based email prefixes
-        self.role_prefixes = {
-            'admin', 'administrator', 'support', 'help', 'info', 'contact',
-            'sales', 'marketing', 'billing', 'accounts', 'abuse', 'postmaster'
-        }
-        
-        # Common disposable email domains (expanded list)
-        self.disposable_domains = {
-            'mailinator.com', 'mailinator.net', 'mailinator.org', 'mailinator.info',
-            'guerrillamail.com', 'guerrillamail.info', 'guerrillamail.biz',
-            'guerrillamail.de', 'guerrillamail.net', 'guerrillamail.org',
-            'guerrillamailblock.com', 'grr.la',
-            'tempmail.com', 'throwawaymail.com', 'tempmail.net',
-            'disposablemail.com', 'yopmail.com', 'maildrop.cc',
-            'temp-mail.org', 'fakeinbox.com', '10minutemail.com',
-            'trashmail.com', 'sharklasers.com', 'spam4.me'
-        }
-
-        # Example/Test domains that should be marked as risky
-        self.example_domains = {
-            'example.com', 'example.net', 'example.org', 'test.com', 'test.net',
-            'test.org', 'domain.com', 'domain.net', 'domain.org'
-        }
-
-        # SMTP provider patterns
-        self.smtp_providers = {
-            'google': ['google', 'gmail'],
-            'microsoft': ['outlook', 'hotmail', 'microsoft'],
-            'yahoo': ['yahoo'],
-            'aol': ['aol'],
-            'proton': ['proton'],
-            'zoho': ['zoho'],
-            'yandex': ['yandex']
-        }
-        
-        # Providers that commonly use catch-all configurations
-        self.common_catchall_providers = {
-            'google': ['aspmx.l.google.com', 'alt1.aspmx.l.google.com', 'alt2.aspmx.l.google.com'],
-            'microsoft': ['mail.protection.outlook.com'],
-            'zoho': ['mx.zoho.com', 'mx2.zoho.com'],
-            'proton': ['mail.protonmail.ch']
-        }
+        # Use constants from validation_constants module
+        self.free_email_providers = FREE_EMAIL_PROVIDERS
+        self.role_prefixes = ROLE_PREFIXES
+        self.disposable_domains = DISPOSABLE_DOMAINS
+        self.example_domains = EXAMPLE_DOMAINS
+        self.smtp_providers = SMTP_PROVIDERS
+        self.common_catchall_providers = COMMON_CATCHALL_PROVIDERS
         
     async def validate(self, email: str) -> EmailValidationResult:
         """
