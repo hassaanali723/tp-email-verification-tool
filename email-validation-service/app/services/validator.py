@@ -2,6 +2,7 @@ import re
 import dns.asyncresolver
 import aiosmtplib
 import socket
+import redis
 from typing import List, Dict, Optional, Tuple
 from email.utils import parseaddr
 import asyncio
@@ -19,6 +20,8 @@ from ..models.validation import (
     BlacklistInfo
 )
 from ..config import settings
+from .dns_validator import DNSValidator
+from .circuit_breaker import CircuitBreaker
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -80,6 +83,20 @@ class EmailValidator:
             'spamhaus': -40,       # Major impact
             'spamcop': -30,        # High impact
         }
+        
+        # Initialize Redis client
+        self.redis = redis.from_url(
+            f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}",
+            password=settings.REDIS_PASSWORD,
+            db=settings.REDIS_DB,
+            decode_responses=True
+        )
+        
+        # Initialize circuit breaker
+        self.circuit_breaker = CircuitBreaker(self.redis)
+        
+        # Initialize DNS validator for fallback
+        self.dns_validator = DNSValidator()
 
     async def validate_email(self, email: str, check_mx: bool = True, 
                            check_smtp: bool = True, check_disposable: bool = True,
@@ -88,6 +105,22 @@ class EmailValidator:
         Main method to validate a single email address using step-by-step validation
         """
         logger.info(f"Starting validation for: {email}")
+        
+        # Check if circuit breaker is open (SMTP service is down)
+        if self.circuit_breaker.is_open:
+            logger.info(f"Circuit breaker is open, using DNS-only validation for {email}")
+            # Use DNS validation instead of SMTP
+            result = await self.dns_validator.validate(email)
+            result.details.general["validation_method"] = "dns"
+            return result
+        
+        # If SMTP check is explicitly disabled, use DNS validation
+        if not check_smtp:
+            logger.info(f"SMTP check disabled, using DNS-only validation for {email}")
+            result = await self.dns_validator.validate(email)
+            result.details.general["validation_method"] = "dns"
+            result.details.general["reason"] = "SMTP check disabled"
+            return result
 
         # Initialize result
         result = EmailValidationResult(
@@ -95,7 +128,7 @@ class EmailValidator:
             is_valid=False,
             status=ValidationStatus.UNKNOWN,
             details=ValidationDetails(
-                general={"domain": "", "reason": ""},
+                general={"domain": "", "reason": "", "validation_method": "smtp"},
                 sub_status=UnknownReason.NO_CONNECT
             )
         )
@@ -173,28 +206,77 @@ class EmailValidator:
             # STEP 5: SMTP Verification (Optional)
             if check_smtp and mx_records:
                 logger.info(f"Step 5: Performing SMTP verification for {email}")
+                
                 async with self._smtp_semaphore:
                     try:
                         smtp_result = await asyncio.wait_for(
                             self._verify_smtp(email, domain, mx_records[0]), 
                             timeout=settings.SMTP_TIMEOUT
                         )
+                        
+                        # Check if this was a timeout or connection error
+                        if smtp_result.get("is_timeout", False):
+                            # Record SMTP timeout in circuit breaker
+                            self.circuit_breaker.record_smtp_timeout()
+                            
+                            # Fall back to DNS validation
+                            logger.warning(f"SMTP timeout for {email}, falling back to DNS validation")
+                            self.circuit_breaker.record_dns_fallback()
+                            dns_result = await self.dns_validator.validate(email)
+                            dns_result.details.general["validation_method"] = "dns"
+                            dns_result.details.general["reason"] += " (SMTP timeout fallback)"
+                            return dns_result
+                        
+                        # Process normal SMTP result
+                        if smtp_result.get("exists") is True:
+                            result.is_valid = True
+                            result.status = ValidationStatus.DELIVERABLE
+                            result.details.general["reason"] = smtp_result.get("reason", "SMTP validation successful")
+                            
+                            # Check if mailbox is full
+                            if "mailbox full" in smtp_result.get("reason", "").lower():
+                                result.details.attributes.mailbox_full = True
+                                result.status = ValidationStatus.RISKY
+                                result.details.sub_status = RiskyReason.FULL_MAILBOX
+                        
+                        elif smtp_result.get("exists") is False:
+                            result.is_valid = False
+                            result.status = ValidationStatus.UNDELIVERABLE
+                            result.details.general["reason"] = smtp_result.get("reason", "Email does not exist")
+                            result.details.sub_status = smtp_result.get("sub_status", UndeliverableReason.REJECTED_EMAIL)
+                            logger.info(f"Validation stopped at Step 5: SMTP verification failed for {email}")
+                            return result
+                        
                     except asyncio.TimeoutError:
-                        result.status = ValidationStatus.UNKNOWN
-                        result.details.general["reason"] = "SMTP validation timeout"
-                        result.details.sub_status = UnknownReason.TIMEOUT
-                        logger.warning(f"Validation stopped at Step 5: SMTP timeout for {email}")
-                        return result
-
-                if not smtp_result["exists"]:
-                    if smtp_result.get("sub_status") in [UnknownReason.TIMEOUT, UnknownReason.NO_CONNECT, UnknownReason.UNAVAILABLE_SMTP]:
-                        result.status = ValidationStatus.UNKNOWN
-                    else:
-                        result.status = ValidationStatus.UNDELIVERABLE
-                    result.details.general["reason"] = smtp_result.get("reason", "Email does not exist")
-                    result.details.sub_status = smtp_result.get("sub_status", UndeliverableReason.REJECTED_EMAIL)
-                    logger.info(f"Validation stopped at Step 5: SMTP verification failed for {email}")
-                    return result
+                        # Record SMTP timeout in circuit breaker
+                        self.circuit_breaker.record_smtp_timeout()
+                        
+                        # Fall back to DNS validation
+                        logger.warning(f"SMTP timeout for {email}, falling back to DNS validation")
+                        self.circuit_breaker.record_dns_fallback()
+                        dns_result = await self.dns_validator.validate(email)
+                        dns_result.details.general["validation_method"] = "dns"
+                        dns_result.details.general["reason"] += " (SMTP timeout fallback)"
+                        return dns_result
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        # Only record timeout for connection-related errors
+                        if ("timeout" in error_str or 
+                            "connection" in error_str or 
+                            "network" in error_str or 
+                            "unreachable" in error_str or
+                            "refused" in error_str or
+                            "reset" in error_str):
+                            logger.warning(f"SMTP connection error for {email}: {str(e)}")
+                            self.circuit_breaker.record_smtp_timeout()
+                            self.circuit_breaker.record_dns_fallback()
+                        
+                        # Fall back to DNS validation
+                        logger.warning(f"SMTP error for {email}: {str(e)}, falling back to DNS validation")
+                        dns_result = await self.dns_validator.validate(email)
+                        dns_result.details.general["validation_method"] = "dns"
+                        dns_result.details.general["reason"] += f" (SMTP error fallback: {str(e)})"
+                        return dns_result
 
             # STEP 6: Catch-All Check (Optional)
             if check_catch_all and mx_records:
@@ -228,6 +310,17 @@ class EmailValidator:
 
         except Exception as e:
             logger.error(f"Unexpected error validating {email}: {str(e)}")
+            
+            # Fall back to DNS validation
+            logger.warning(f"Unexpected error for {email}, falling back to DNS validation")
+            try:
+                dns_result = await self.dns_validator.validate(email)
+                dns_result.details.general["validation_method"] = "dns"
+                dns_result.details.general["reason"] += f" (Validation error fallback: {str(e)})"
+                return dns_result
+            except Exception as dns_error:
+                logger.error(f"DNS validation also failed for {email}: {str(dns_error)}")
+            
             result.status = ValidationStatus.UNKNOWN
             result.details.general["reason"] = f"Validation error: {str(e)}"
             result.details.sub_status = UnknownReason.UNEXPECTED_ERROR
@@ -279,7 +372,7 @@ class EmailValidator:
         try:
             logger.info(f"Checking catch-all for domain: {domain}")
             
-            # For Gmail and other major providers, we need to use their specific SMTP servers
+            # For Gmail and other major providers, use their specific SMTP servers
             if domain.lower() in self.free_email_providers:
                 if domain.lower() == 'gmail.com':
                     mx_record = 'gmail-smtp-in.l.google.com'
@@ -300,30 +393,23 @@ class EmailValidator:
                 tls_context=None
             )
             
-            try:
-                logger.info(f"Connecting to SMTP server for catch-all check: {mx_record}")
-                await asyncio.wait_for(smtp.connect(), timeout=settings.SMTP_TIMEOUT)
-                await asyncio.wait_for(smtp.helo('test.com'), timeout=settings.SMTP_TIMEOUT)
-            except (asyncio.TimeoutError, Exception) as e:
-                logger.warning(f"Catch-all check connection failed for {mx_record}: {str(e)}")
-                return False
-
-            try:
-                logger.info(f"Sending RCPT command for catch-all check: {random_email}")
-                await asyncio.wait_for(smtp.mail('test@test.com'), timeout=settings.SMTP_TIMEOUT)
-                code, message = await asyncio.wait_for(smtp.rcpt(random_email), timeout=settings.SMTP_TIMEOUT)
-                logger.info(f"Catch-all check response for {domain}: {code} - {message}")
-                
-                # If we get a 250 (OK) response for a non-existent email,
-                # the domain is likely a catch-all
-                return code == 250
-                
-            except (asyncio.TimeoutError, Exception) as e:
-                logger.warning(f"Catch-all check command failed for {domain}: {str(e)}")
-                return False
+            # Connect and send HELO
+            logger.info(f"Connecting to SMTP server for catch-all check: {mx_record}")
+            await asyncio.wait_for(smtp.connect(), timeout=settings.SMTP_TIMEOUT)
+            await asyncio.wait_for(smtp.helo('test.com'), timeout=settings.SMTP_TIMEOUT)
+            
+            # Send MAIL FROM and RCPT TO commands
+            logger.info(f"Sending RCPT command for catch-all check: {random_email}")
+            await asyncio.wait_for(smtp.mail('test@test.com'), timeout=settings.SMTP_TIMEOUT)
+            code, message = await asyncio.wait_for(smtp.rcpt(random_email), timeout=settings.SMTP_TIMEOUT)
+            logger.info(f"Catch-all check response for {domain}: {code} - {message}")
+            
+            # If we get a 250 (OK) response for a non-existent email,
+            # the domain is likely a catch-all
+            return code == 250
                 
         except Exception as e:
-            logger.error(f"Catch-all check error for {domain}: {str(e)}")
+            logger.warning(f"Catch-all check failed for {domain}: {str(e)}")
             return False
         finally:
             # Always try to close the connection
@@ -366,11 +452,13 @@ class EmailValidator:
     async def _verify_smtp(self, email: str, domain: str, mx_record: str) -> Dict:
         """
         Verify email existence using SMTP with connection pooling
+        Returns a dictionary with the verification result and metadata
         """
         smtp = None
         try:
             logger.info(f"Connecting to SMTP server for {email}: {mx_record}")
-            # For Gmail and other major providers, we need to use their specific SMTP servers
+            
+            # For Gmail and other major providers, use their specific SMTP servers
             if domain.lower() in self.free_email_providers:
                 if domain.lower() == 'gmail.com':
                     mx_record = 'gmail-smtp-in.l.google.com'
@@ -385,93 +473,89 @@ class EmailValidator:
             # Create new SMTP connection for each verification
             smtp = aiosmtplib.SMTP(
                 hostname=mx_record,
-                port=25,  # Use port 25 which we confirmed works
+                port=settings.SMTP_PORT,
                 timeout=settings.SMTP_TIMEOUT,
-                use_tls=False,  # No TLS on port 25
+                use_tls=settings.SMTP_USE_TLS,
                 tls_context=None
             )
             
-            try:
-                logger.info(f"Connecting to SMTP server: {mx_record}")
-                await asyncio.wait_for(smtp.connect(), timeout=settings.SMTP_TIMEOUT)
-                await asyncio.wait_for(smtp.helo('test.com'), timeout=settings.SMTP_TIMEOUT)
-            except asyncio.TimeoutError:
-                return {"exists": False, "reason": "Connection timeout", "sub_status": UnknownReason.TIMEOUT}
-            except aiosmtplib.SMTPResponseException as e:
-                logger.warning(f"Connection failed with SMTP code {e.code}: {e.message}")
-                if e.code == 554:  # No SMTP service
-                    return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.INVALID_DOMAIN}
-                else:
-                    return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.INVALID_SMTP}
-            except Exception as e:
-                error_msg = str(e).lower()
-                logger.warning(f"Connection failed: {str(e)}")
-                if "certificate" in error_msg or "ssl" in error_msg:
-                    return {"exists": False, "reason": str(e), "sub_status": UndeliverableReason.INVALID_SMTP}
-                elif "dns" in error_msg:
-                    return {"exists": False, "reason": str(e), "sub_status": UndeliverableReason.INVALID_DOMAIN}
-                else:
-                    return {"exists": False, "reason": str(e), "sub_status": UndeliverableReason.INVALID_SMTP}
-
-            try:
-                logger.info(f"Sending RCPT command for: {email}")
-                await asyncio.wait_for(smtp.mail('test@test.com'), timeout=settings.SMTP_TIMEOUT)
-                code, message = await asyncio.wait_for(smtp.rcpt(email), timeout=settings.SMTP_TIMEOUT)
-                logger.info(f"SMTP response for {email}: {code} - {message}")
-            except asyncio.TimeoutError:
-                return {"exists": False, "reason": "SMTP command timeout", "sub_status": UnknownReason.TIMEOUT}
-            except aiosmtplib.SMTPResponseException as e:
-                logger.warning(f"SMTP command failed with code {e.code}: {e.message}")
-                
-                # Handle SMTP response codes properly
-                if e.code == 450:  # Requested mail action not taken: mailbox unavailable
-                    return {"exists": False, "reason": e.message, "sub_status": UnknownReason.UNAVAILABLE_SMTP}
-                elif e.code == 451:  # Temporary local error
-                    return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.INVALID_SMTP}
-                elif e.code == 550:  # Mailbox unavailable
-                    if "spamhaus" in e.message.lower() or "blocked" in e.message.lower():
-                        return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.INVALID_SMTP}
-                    else:
-                        return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.REJECTED_EMAIL}
-                elif code == 451:  # Temporary local error
-                    return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_SMTP}
-                else:
-                    return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_SMTP}
-            except Exception as e:
-                logger.warning(f"SMTP command failed: {str(e)}")
-                return {"exists": False, "reason": str(e), "sub_status": UndeliverableReason.INVALID_SMTP}
+            # Connect and send HELO
+            logger.info(f"Connecting to SMTP server: {mx_record} on port {settings.SMTP_PORT}")
+            await asyncio.wait_for(smtp.connect(), timeout=settings.SMTP_TIMEOUT)
+            await asyncio.wait_for(smtp.helo('test.com'), timeout=settings.SMTP_TIMEOUT)
+            
+            # Send MAIL FROM and RCPT TO commands
+            logger.info(f"Sending RCPT command for: {email}")
+            await asyncio.wait_for(smtp.mail('test@test.com'), timeout=settings.SMTP_TIMEOUT)
+            code, message = await asyncio.wait_for(smtp.rcpt(email), timeout=settings.SMTP_TIMEOUT)
+            logger.info(f"SMTP response for {email}: {code} - {message}")
             
             # Handle successful SMTP response codes
             if code == 250:  # OK
-                return {"exists": True}
-            elif code == 450:  # Requested mail action not taken: mailbox unavailable
-                return {"exists": False, "reason": message, "sub_status": UnknownReason.UNAVAILABLE_SMTP}
-            elif code == 550:  # Mailbox unavailable
-                return {"exists": False, "reason": message, "sub_status": UndeliverableReason.REJECTED_EMAIL}
-            elif code == 553:  # Invalid mailbox
-                return {"exists": False, "reason": message, "sub_status": UndeliverableReason.REJECTED_EMAIL}
+                return {"exists": True, "is_timeout": False}
             elif code == 552:  # Mailbox full
-                return {"exists": True, "reason": message}
+                return {"exists": True, "reason": message, "is_timeout": False}
+            elif code == 450:  # Requested mail action not taken: mailbox unavailable
+                return {"exists": False, "reason": message, "sub_status": UnknownReason.UNAVAILABLE_SMTP, "is_timeout": False}
+            elif code == 550:  # Mailbox unavailable
+                return {"exists": False, "reason": message, "sub_status": UndeliverableReason.REJECTED_EMAIL, "is_timeout": False}
+            elif code == 553:  # Invalid mailbox
+                return {"exists": False, "reason": message, "sub_status": UndeliverableReason.REJECTED_EMAIL, "is_timeout": False}
             elif code == 554:  # Transaction failed
                 if "dns" in message.lower():
-                    return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_DOMAIN}
+                    return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_DOMAIN, "is_timeout": False}
                 else:
-                    return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_SMTP}
+                    return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_SMTP, "is_timeout": False}
             elif code == 451:  # Temporary local error
-                return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_SMTP}
+                return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_SMTP, "is_timeout": False}
             else:
-                return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_SMTP}
-
+                return {"exists": False, "reason": message, "sub_status": UndeliverableReason.INVALID_SMTP, "is_timeout": False}
+                
+        except asyncio.TimeoutError:
+            # Explicitly mark timeout errors
+            error_msg = f"Error connecting to {mx_record} on port {settings.SMTP_PORT}: Timeout"
+            logger.warning(f"Connection failed: {error_msg}")
+            return {"exists": False, "reason": error_msg, "sub_status": UnknownReason.TIMEOUT, "is_timeout": True}
+            
+        except aiosmtplib.SMTPResponseException as e:
+            logger.warning(f"SMTP error with code {e.code}: {e.message}")
+            
+            # Handle SMTP response codes
+            if e.code == 554:  # No SMTP service
+                return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.INVALID_DOMAIN, "is_timeout": False}
+            elif e.code == 550:  # Mailbox unavailable
+                if "spamhaus" in e.message.lower() or "blocked" in e.message.lower():
+                    return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.INVALID_SMTP, "is_timeout": False}
+                else:
+                    return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.REJECTED_EMAIL, "is_timeout": False}
+            elif e.code == 450:  # Requested mail action not taken: mailbox unavailable
+                return {"exists": False, "reason": e.message, "sub_status": UnknownReason.UNAVAILABLE_SMTP, "is_timeout": False}
+            elif e.code == 451:  # Temporary local error
+                return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.INVALID_SMTP, "is_timeout": False}
+            else:
+                return {"exists": False, "reason": e.message, "sub_status": UndeliverableReason.INVALID_SMTP, "is_timeout": False}
+                
         except Exception as e:
-            logger.error(f"SMTP error for {email}: {str(e)}")
-            error_str = str(e)
-            if "certificate" in error_str.lower() or "ssl" in error_str.lower():
-                return {"exists": False, "reason": error_str, "sub_status": UndeliverableReason.INVALID_SMTP}
-            elif "dns" in error_str.lower():
-                return {"exists": False, "reason": error_str, "sub_status": UndeliverableReason.INVALID_DOMAIN}
+            error_str = str(e).lower()
+            logger.warning(f"Connection failed: {str(e)}")
+            
+            # Check if this is a timeout-related error
+            is_timeout = any(term in error_str for term in [
+                "timeout", "connection", "network", "unreachable", "refused", "reset"
+            ])
+            
+            # Categorize the error
+            if "timeout" in error_str or "connection" in error_str or "network" in error_str:
+                return {"exists": False, "reason": str(e), "sub_status": UnknownReason.TIMEOUT, "is_timeout": True}
+            elif "certificate" in error_str or "ssl" in error_str:
+                return {"exists": False, "reason": str(e), "sub_status": UndeliverableReason.INVALID_SMTP, "is_timeout": False}
+            elif "dns" in error_str:
+                return {"exists": False, "reason": str(e), "sub_status": UndeliverableReason.INVALID_DOMAIN, "is_timeout": False}
             else:
-                return {"exists": False, "reason": error_str, "sub_status": UndeliverableReason.INVALID_SMTP}
+                return {"exists": False, "reason": str(e), "sub_status": UndeliverableReason.INVALID_SMTP, "is_timeout": is_timeout}
+                
         finally:
+            # Always try to close the connection
             if smtp and smtp.is_connected:
                 try:
                     await asyncio.wait_for(smtp.quit(), timeout=2.0)

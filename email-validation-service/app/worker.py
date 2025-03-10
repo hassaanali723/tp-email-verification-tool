@@ -71,12 +71,20 @@ class EmailValidationWorker:
         all_results = []
         for i, chunk in enumerate(chunks):
             try:
+                # Check circuit breaker status before processing chunk
+                circuit_open = self.validator.circuit_breaker.is_open
+                if circuit_open:
+                    logger.warning(f"Circuit breaker is open for chunk {i+1}/{len(chunks)} - using DNS validation")
+                
                 # Process chunk concurrently with validation flags
+                # If circuit is open, disable SMTP checks for the entire chunk
+                use_smtp = validation_flags.get('check_smtp', True) and not circuit_open
+                
                 chunk_results = await asyncio.gather(
                     *[self.validator.validate_email(
                         email,
                         check_mx=validation_flags.get('check_mx', True),
-                        check_smtp=validation_flags.get('check_smtp', True),
+                        check_smtp=use_smtp,
                         check_disposable=validation_flags.get('check_disposable', True),
                         check_catch_all=validation_flags.get('check_catch_all', True),
                         check_blacklist=validation_flags.get('check_blacklist', True)
@@ -131,6 +139,9 @@ class EmailValidationWorker:
             settings.REDIS_RESULT_EXPIRY,
             json.dumps(final_results)
         )
+        
+        # Reset circuit breaker at the end of the batch
+        self.validator.circuit_breaker.reset()
         
         logger.info(f"Completed batch {batch_id}")
 

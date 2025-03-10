@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, List
 
 class Settings(BaseSettings):
     # API Settings
@@ -8,8 +8,19 @@ class Settings(BaseSettings):
     
     # Validation Settings
     DNS_TIMEOUT: int = 10
-    SMTP_TIMEOUT: int = 30
+    SMTP_TIMEOUT: int = 5
     MAX_CONCURRENT_VALIDATIONS: int = 5
+    
+    # SMTP Settings
+    SMTP_PORT: int = 23442  # Default SMTP port
+    SMTP_USE_TLS: bool = False  # Whether to use TLS
+    SMTP_FALLBACK_PORTS: List[int] = [24324, 234234]  # Fallback ports if primary fails
+    
+    # Circuit Breaker Settings
+    SMTP_CIRCUIT_BREAKER_THRESHOLD: int = 10  # Number of failures before opening circuit
+    SMTP_CIRCUIT_BREAKER_TIMEOUT: int = 300   # Seconds to wait before attempting recovery
+    SMTP_ERROR_THRESHOLD_PERCENTAGE: int = 30  # Percentage of errors to trigger circuit
+    DNS_ONLY_MODE_ENABLED: bool = False       # Emergency switch for DNS-only mode
     
     # Cache Settings
     CATCH_ALL_CACHE_TTL: int = 3600  # 1 hour
