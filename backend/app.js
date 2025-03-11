@@ -3,7 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const fileRoutes = require('./routes/fileRoutes');
-const emailValidationRoutes = require("./routes/emailValidationRoute");
+const emailValidationRoutes = require("./routes/emailValidation");
 
 const app = express();
 
@@ -15,7 +15,7 @@ app.use(cors());
 
 // Routes
 app.use('/api/files', fileRoutes);
-app.use("/api/emails", emailValidationRoutes);
+app.use('/api/email-validation', emailValidationRoutes);
 
 // MongoDB Connection
 const PORT = process.env.PORT || 5000;
