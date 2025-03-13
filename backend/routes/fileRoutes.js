@@ -1,94 +1,221 @@
 const express = require('express');
+const router = express.Router();
 const multer = require('multer');
+const storageService = require('../services/storageService');
+const fileProcessingService = require('../services/fileProcessingService');
 const File = require('../models/File');
 const EmailValidation = require("../models/EmailValidation");
-const router = express.Router();
 
-// Multer setup (temporary folder)
-const upload = multer({ dest: 'uploads/' });
+// Configure multer for memory storage
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: process.env.MAX_FILE_SIZE || 10 * 1024 * 1024 // 10MB default
+    },
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = (process.env.ALLOWED_FILE_TYPES || '.csv,.xlsx,.xls').split(',');
+        const fileExt = '.' + file.originalname.split('.').pop().toLowerCase();
+        
+        if (allowedTypes.includes(fileExt)) {
+            cb(null, true);
+        } else {
+            cb(new Error(`File type not allowed. Allowed types: ${allowedTypes.join(', ')}`));
+        }
+    }
+});
 
-// POST route to upload file and save to DB
+/**
+ * Upload and process file
+ * POST /api/files/upload
+ */
 router.post('/upload', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).send('No file uploaded.');
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: 'No file uploaded'
+            });
+        }
 
-    // Read file content
-    const fs = require('fs');
-    const fileData = fs.readFileSync(req.file.path);
+        // Save file using storage service
+        const fileData = await storageService.saveFile(
+            req.file.buffer,
+            req.file.originalname
+        );
 
-    // Save file to MongoDB
-    const newFile = new File({
-      filename: req.file.originalname,
-      data: fileData,
-      contentType: req.file.mimetype
-    });
+        // Process file and extract emails
+        const result = await fileProcessingService.processFile(fileData);
 
-    await newFile.save();
-
-    // Cleanup: remove file from temporary folder
-    fs.unlinkSync(req.file.path);
-
-    res.status(201).json({ message: 'File uploaded successfully.', fileId: newFile._id });
-  } catch (error) {
-    console.error('Error uploading file:', error);
-    res.status(500).send('Internal Server Error');
-  }
+        res.json({
+            success: true,
+            data: {
+                fileId: result.fileId,
+                totalEmails: result.totalEmails,
+                message: 'File uploaded and processing started'
+            }
+        });
+    } catch (error) {
+        console.error('Error in file upload:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Error processing file upload'
+        });
+    }
 });
 
-// Add this new endpoint to fileRoutes.js
-router.get('/list', async (req, res) => {
-  try {
-      // Fetch all files with their validation status
-      const files = await File.find().sort({ createdAt: -1 });
-      
-      // Get validation results for all files
-      const filesWithStatus = await Promise.all(files.map(async (file) => {
-          const validation = await EmailValidation.findOne({ fileId: file._id });
-          
-          return {
-              fileName: file.filename,
-              fileId: file._id,
-              emailsReady: validation?.validations?.length || 0,
-              status: validation ? 'verified' : 'uploaded',
-              validationResults: validation?.validations || [],
-              deliverableRate: validation ? (validation.validations.filter(v => 
-                  v.isValid && v.deliverabilityScore >= 90
-              ).length / validation.validations.length * 100) : 0
-          };
-      }));
+/**
+ * Get file processing status
+ * GET /api/files/:fileId/status
+ */
+router.get('/:fileId/status', async (req, res) => {
+    try {
+        const file = await File.findById(req.params.fileId);
+        
+        if (!file) {
+            return res.status(404).json({
+                success: false,
+                message: 'File not found'
+            });
+        }
 
-      res.json(filesWithStatus);
-  } catch (error) {
-      console.error('Error fetching files:', error);
-      res.status(500).json({ error: 'Failed to fetch files' });
-  }
+        res.json({
+            success: true,
+            data: {
+                status: file.status,
+                progress: {
+                    totalRows: file.processingProgress.totalRows,
+                    processedRows: file.processingProgress.processedRows,
+                    emailsFound: file.processingProgress.emailsFound,
+                    percentage: file.progressPercentage
+                },
+                error: file.error,
+                lastUpdated: file.processingProgress.lastUpdated
+            }
+        });
+    } catch (error) {
+        console.error('Error getting file status:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Error getting file status'
+        });
+    }
 });
 
-// Add this DELETE endpoint to your fileRoutes.js
-router.delete('/:id', async (req, res) => {
-  try {
-      const fileId = req.params.id;
+/**
+ * Get list of files
+ * GET /api/files
+ */
+router.get('/', async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
 
-      // Delete the file
-      await File.findByIdAndDelete(fileId);
+        const files = await File.find()
+            .select('-path') // Exclude sensitive path information
+            .populate({
+                path: 'validationBatches',
+                select: 'results status',
+                match: { status: 'completed' }
+            })
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
 
-      // Delete associated validation results
-      await EmailValidation.findOneAndDelete({ fileId });
+        const total = await File.countDocuments();
 
-      // Remove the actual file from uploads if it exists
-      // You might want to adjust the path based on your file storage logic
-      const file = await File.findById(fileId);
-      if (file?.path) {
-          fs.unlink(file.path, (err) => {
-              if (err) console.error('Error deleting file from disk:', err);
-          });
-      }
+        // Transform the data to match frontend requirements
+        const transformedFiles = files.map(file => {
+            const baseInfo = {
+                id: file._id,
+                filename: file.originalName,
+                uploadedAt: file.uploadedAt
+            };
 
-      res.json({ message: 'File deleted successfully' });
-  } catch (error) {
-      console.error('Error deleting file:', error);
-      res.status(500).json({ error: 'Failed to delete file' });
-  }
+            // If file has no completed validation, it's pending verification
+            if (!file.validationBatches || file.validationBatches.length === 0) {
+                return {
+                    ...baseInfo,
+                    status: 'unverified',
+                    emailsReady: file.processingProgress.emailsFound || 0
+                };
+            }
+
+            // Get the results from the completed validation batch
+            const results = file.validationBatches[0].results;
+            const total = Object.values(results).reduce((sum, count) => sum + count, 0);
+            
+            return {
+                ...baseInfo,
+                status: 'verified',
+                validationResults: {
+                    deliverable: ((results.deliverable || 0) / total * 100).toFixed(1),
+                    risky: ((results.risky || 0) / total * 100).toFixed(1),
+                    undeliverable: ((results.undeliverable || 0) / total * 100).toFixed(1),
+                    unknown: ((results.unknown || 0) / total * 100).toFixed(1),
+                    totalEmails: total
+                }
+            };
+        });
+
+        res.json({
+            success: true,
+            data: {
+                files: transformedFiles,
+                pagination: {
+                    total,
+                    page,
+                    pages: Math.ceil(total / limit)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error getting files list:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Error getting file list'
+        });
+    }
+});
+
+/**
+ * Delete file
+ * DELETE /api/files/:fileId
+ */
+router.delete('/:fileId', async (req, res) => {
+    try {
+        const file = await File.findById(req.params.fileId);
+        
+        if (!file) {
+            return res.status(404).json({
+                success: false,
+                message: 'File not found'
+            });
+        }
+
+        // Delete file from storage if it exists
+        if (file.filename) {
+            try {
+                await storageService.deleteFile(file.filename);
+            } catch (error) {
+                console.warn(`Storage file not found for ${file.filename}`);
+            }
+        }
+
+        // Delete file record from database
+        await File.findByIdAndDelete(req.params.fileId);
+
+        res.json({
+            success: true,
+            message: 'File deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting file:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Error deleting file'
+        });
+    }
 });
 
 module.exports = router;
