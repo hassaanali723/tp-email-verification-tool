@@ -86,7 +86,7 @@ const statisticsSchema = new mongoose.Schema({
     }
 }, { _id: false });
 
-const validationBatchSchema = new mongoose.Schema({
+const emailValidationResultSchema = new mongoose.Schema({
     batchId: {
         type: String,
         required: true,
@@ -134,13 +134,12 @@ const validationBatchSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
-validationBatchSchema.index({ batchId: 1 }, { unique: true });
-validationBatchSchema.index({ fileId: 1 });
-validationBatchSchema.index({ status: 1 });
-validationBatchSchema.index({ createdAt: -1 });
+emailValidationResultSchema.index({ fileId: 1 });
+emailValidationResultSchema.index({ status: 1 });
+emailValidationResultSchema.index({ createdAt: -1 });
 
 // Compound indexes for common queries
-validationBatchSchema.index({ fileId: 1, status: 1 });
-validationBatchSchema.index({ fileId: 1, createdAt: -1 });
+emailValidationResultSchema.index({ fileId: 1, status: 1 });
+emailValidationResultSchema.index({ fileId: 1, createdAt: -1 });
 
-module.exports = mongoose.model('ValidationBatch', validationBatchSchema); 
+module.exports = mongoose.model('EmailValidationResult', emailValidationResultSchema, 'email-validation-results'); 

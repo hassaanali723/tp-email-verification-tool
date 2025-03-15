@@ -61,9 +61,9 @@ const fileSchema = new mongoose.Schema({
         code: String,
         timestamp: Date
     },
-    validationBatches: [{
+    validationResults: [{
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'ValidationBatch'
+        ref: 'EmailValidationResult'
     }]
 }, {
     timestamps: true

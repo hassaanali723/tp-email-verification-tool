@@ -4,7 +4,7 @@ const multer = require('multer');
 const storageService = require('../services/storageService');
 const fileProcessingService = require('../services/fileProcessingService');
 const File = require('../models/File');
-const EmailValidation = require("../models/EmailValidation");
+const EmailValidationResult = require('../models/EmailValidationResult');
 
 // Configure multer for memory storage
 const upload = multer({
@@ -113,11 +113,6 @@ router.get('/', async (req, res) => {
 
         const files = await File.find()
             .select('-path') // Exclude sensitive path information
-            .populate({
-                path: 'validationBatches',
-                select: 'results status',
-                match: { status: 'completed' }
-            })
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
@@ -125,38 +120,47 @@ router.get('/', async (req, res) => {
         const total = await File.countDocuments();
 
         // Transform the data to match frontend requirements
-        const transformedFiles = files.map(file => {
+        const transformedFiles = await Promise.all(files.map(async file => {
             const baseInfo = {
                 id: file._id,
                 filename: file.originalName,
                 uploadedAt: file.uploadedAt
             };
 
-            // If file has no completed validation, it's pending verification
-            if (!file.validationBatches || file.validationBatches.length === 0) {
+            // Find the latest completed validation result for this file
+            const validationResult = await EmailValidationResult.findOne({
+                fileId: file._id,
+                status: 'completed'
+            }).sort({ updatedAt: -1 });
+
+            // If no completed validation found, return as unverified
+            if (!validationResult) {
                 return {
                     ...baseInfo,
                     status: 'unverified',
-                    emailsReady: file.processingProgress.emailsFound || 0
+                    emailsReady: file.processingProgress?.emailsFound || 0
                 };
             }
 
-            // Get the results from the completed validation batch
-            const results = file.validationBatches[0].results;
-            const total = Object.values(results).reduce((sum, count) => sum + count, 0);
+            // Get the statistics from the validation result
+            const stats = validationResult.statistics;
+            const total = stats.deliverable.count + 
+                         stats.undeliverable.count + 
+                         stats.risky.count + 
+                         stats.unknown.count;
             
             return {
                 ...baseInfo,
                 status: 'verified',
                 validationResults: {
-                    deliverable: ((results.deliverable || 0) / total * 100).toFixed(1),
-                    risky: ((results.risky || 0) / total * 100).toFixed(1),
-                    undeliverable: ((results.undeliverable || 0) / total * 100).toFixed(1),
-                    unknown: ((results.unknown || 0) / total * 100).toFixed(1),
+                    deliverable: ((stats.deliverable.count || 0) / total * 100).toFixed(1),
+                    risky: ((stats.risky.count || 0) / total * 100).toFixed(1),
+                    undeliverable: ((stats.undeliverable.count || 0) / total * 100).toFixed(1),
+                    unknown: ((stats.unknown.count || 0) / total * 100).toFixed(1),
                     totalEmails: total
                 }
             };
-        });
+        }));
 
         res.json({
             success: true,
@@ -214,6 +218,50 @@ router.delete('/:fileId', async (req, res) => {
         res.status(500).json({
             success: false,
             message: error.message || 'Error deleting file'
+        });
+    }
+});
+
+/**
+ * Get extracted emails from a file
+ * GET /api/files/:fileId/emails
+ */
+router.get('/:fileId/emails', async (req, res) => {
+    try {
+        const { fileId } = req.params;
+        
+        // Check if file exists and is processed
+        const file = await File.findById(fileId);
+        if (!file) {
+            return res.status(404).json({
+                success: false,
+                message: 'File not found'
+            });
+        }
+
+        if (file.status !== 'completed') {
+            return res.status(400).json({
+                success: false,
+                message: 'File processing not completed'
+            });
+        }
+
+        // Get emails from temporary storage
+        const emails = await fileProcessingService.getExtractedEmails(fileId);
+
+        res.json({
+            success: true,
+            data: {
+                fileId,
+                totalEmails: emails.length,
+                emails
+            }
+        });
+    } catch (error) {
+        console.error('Error getting extracted emails:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Error retrieving emails'
         });
     }
 });

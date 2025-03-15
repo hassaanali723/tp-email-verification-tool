@@ -8,7 +8,15 @@ const emailValidationService = require('../services/emailValidationService');
  */
 router.post('/batch', async (req, res) => {
     try {
-        const { emails } = req.body;
+        const { 
+            emails,
+            fileId,
+            check_mx = true,
+            check_smtp = true,
+            check_disposable = true,
+            check_catch_all = true,
+            check_blacklist = true
+        } = req.body;
 
         // Validate request
         if (!emails || !Array.isArray(emails) || emails.length === 0) {
@@ -18,8 +26,24 @@ router.post('/batch', async (req, res) => {
             });
         }
 
-        // Start batch validation
-        const result = await emailValidationService.validateEmailBatch(emails);
+        // Validate fileId
+        if (!fileId) {
+            return res.status(400).json({
+                success: false,
+                message: 'fileId is required for batch validation'
+            });
+        }
+
+        // Start batch validation with all validation options
+        const result = await emailValidationService.validateEmailBatch({
+            emails,
+            fileId,
+            check_mx,
+            check_smtp,
+            check_disposable,
+            check_catch_all,
+            check_blacklist
+        });
         
         res.json({
             success: true,
@@ -72,18 +96,32 @@ router.get('/batch/:batchId/status', async (req, res) => {
  */
 router.post('/single', async (req, res) => {
     try {
-        const { email } = req.body;
+        const { 
+            email,
+            check_mx = true,
+            check_smtp = true,
+            check_disposable = true,
+            check_catch_all = true,
+            check_blacklist = true
+        } = req.body;
 
         // Validate request
-        if (!email || typeof email !== 'string') {
+        if (!email) {
             return res.status(400).json({
                 success: false,
                 message: 'Please provide a valid email address'
             });
         }
 
-        // Validate single email
-        const result = await emailValidationService.validateSingleEmail(email);
+        // Validate single email with all validation options
+        const result = await emailValidationService.validateSingleEmail({
+            emails: [email], // FastAPI expects array even for single email
+            check_mx,
+            check_smtp,
+            check_disposable,
+            check_catch_all,
+            check_blacklist
+        });
         
         res.json({
             success: true,

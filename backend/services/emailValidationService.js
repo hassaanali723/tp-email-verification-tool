@@ -1,5 +1,8 @@
 const axios = require('axios');
 const winston = require('winston');
+const EmailValidationResult = require('../models/EmailValidationResult');
+const { ObjectId } = require('mongoose').Types;
+const File = require('../models/File');
 
 // Configure logger
 const logger = winston.createLogger({
@@ -36,21 +39,55 @@ class EmailValidationService {
 
     /**
      * Validates a batch of emails
-     * @param {string[]} emails - Array of email addresses to validate
+     * @param {Object} options - Validation options
+     * @param {string[]} options.emails - Array of email addresses to validate
+     * @param {string} options.fileId - ID of the file being validated
+     * @param {boolean} [options.check_mx=true] - Whether to check MX records
+     * @param {boolean} [options.check_smtp=true] - Whether to check SMTP
+     * @param {boolean} [options.check_disposable=true] - Whether to check if disposable
+     * @param {boolean} [options.check_catch_all=true] - Whether to check catch-all
+     * @param {boolean} [options.check_blacklist=true] - Whether to check blacklist
      * @returns {Promise<Object>} - Batch validation response
      * @throws {Error} - If the validation request fails
      */
-    async validateEmailBatch(emails) {
+    async validateEmailBatch(options) {
         try {
-            logger.info(`Starting batch validation for ${emails.length} emails`);
-            const response = await this.client.post('/validate/batch', { emails });
-            logger.info(`Successfully initiated batch validation. Batch ID: ${response.data.batch_id}`);
+            const { emails, fileId } = options;
+            
+            if (!fileId) {
+                throw new Error('fileId is required for batch validation');
+            }
+
+            logger.info(`Starting batch validation for ${emails.length} emails, fileId: ${fileId}`);
+            
+            const response = await this.client.post('/validate-batch', {
+                emails: emails,
+                check_mx: options.check_mx !== false,
+                check_smtp: options.check_smtp !== false,
+                check_disposable: options.check_disposable !== false,
+                check_catch_all: options.check_catch_all !== false,
+                check_blacklist: options.check_blacklist !== false
+            });
+
+            // Create initial validation result record
+            const validationResult = await EmailValidationResult.create({
+                batchId: response.data.batchId,
+                fileId: fileId.toString(),
+                status: 'processing',
+                totalEmails: emails.length,
+                processedEmails: 0,
+                startTime: new Date()
+            });
+
+            // Update the File document to include this validation result
+            await File.findByIdAndUpdate(fileId, {
+                $push: { validationResults: validationResult._id }
+            });
+
+            logger.info(`Successfully initiated batch validation. Batch ID: ${response.data.batchId}, File ID: ${fileId}`);
             return response.data;
         } catch (error) {
-            logger.error('Error in batch email validation:', {
-                error: error.message,
-                emails_count: emails.length
-            });
+            logger.error('Error in batch email validation:', error);
             throw this._formatError(error);
         }
     }
@@ -64,32 +101,65 @@ class EmailValidationService {
     async getBatchStatus(batchId) {
         try {
             logger.info(`Checking status for batch: ${batchId}`);
-            const response = await this.client.get(`/validate/batch/${batchId}/status`);
-            return this._formatBatchStatus(response.data);
+            const response = await this.client.get(`/validation-status/${batchId}`);
+            const formattedStatus = this._formatBatchStatus(response.data);
+
+            // Only save results when validation is completed
+            if (formattedStatus.status === 'completed') {
+                await EmailValidationResult.findOneAndUpdate(
+                    { batchId: batchId },
+                    { 
+                        $set: {
+                            status: 'completed',
+                            processedEmails: formattedStatus.processedEmails,
+                            totalEmails: formattedStatus.totalEmails,
+                            results: formattedStatus.results,
+                            statistics: formattedStatus.statistics,
+                            completedTime: new Date()
+                        }
+                    },
+                    { new: true }
+                );
+            }
+
+            return {
+                success: true,
+                data: formattedStatus
+            };
         } catch (error) {
-            logger.error('Error checking batch status:', {
-                error: error.message,
-                batchId
-            });
+            logger.error('Error checking batch status:', error);
             throw this._formatError(error);
         }
     }
 
     /**
      * Validates a single email address
-     * @param {string} email - Email address to validate
+     * @param {Object} options - Validation options
+     * @param {string[]} options.emails - Array containing single email address
+     * @param {boolean} [options.check_mx=true] - Whether to check MX records
+     * @param {boolean} [options.check_smtp=true] - Whether to check SMTP
+     * @param {boolean} [options.check_disposable=true] - Whether to check if disposable
+     * @param {boolean} [options.check_catch_all=true] - Whether to check catch-all
+     * @param {boolean} [options.check_blacklist=true] - Whether to check blacklist
      * @returns {Promise<Object>} - Validation result
      * @throws {Error} - If the validation fails
      */
-    async validateSingleEmail(email) {
+    async validateSingleEmail(options) {
         try {
-            logger.info(`Validating single email: ${email}`);
-            const response = await this.client.post('/validate/single', { email });
+            logger.info(`Validating single email: ${options.emails[0]}`);
+            const response = await this.client.post('/validate', {
+                emails: options.emails,
+                check_mx: options.check_mx !== false,
+                check_smtp: options.check_smtp !== false,
+                check_disposable: options.check_disposable !== false,
+                check_catch_all: options.check_catch_all !== false,
+                check_blacklist: options.check_blacklist !== false
+            });
             return this._formatValidationResult(response.data);
         } catch (error) {
             logger.error('Error in single email validation:', {
                 error: error.message,
-                email
+                email: options.emails[0]
             });
             throw this._formatError(error);
         }
