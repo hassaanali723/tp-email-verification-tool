@@ -1,100 +1,164 @@
-# Email Validation Service Documentation
+# Email Validation Service
 
-Welcome to the Email Validation Service documentation. This service provides robust email validation capabilities with support for batch processing, parallel validation, and sophisticated error handling.
+A robust, scalable email validation service built with FastAPI that provides comprehensive email validation capabilities with support for batch processing.
 
-## 📚 Documentation Sections
+## Features
 
-### [Getting Started](Getting-Started)
-- Quick setup guide
-- Installation instructions
-- Running the service locally
+### Smart Email Validation
+- Format validation
+- DNS MX record verification
+- SMTP server validation
+- Disposable email detection
+- Catch-all domain detection
+- Role-based email detection
+- Free email provider detection
 
-### [Architecture](Architecture)
-- System components
-- Data flow
-- Worker system
-- Circuit breaker pattern
+### Advanced Batch Processing
+- Automatic batch size optimization:
+  - Small batches (≤5): Immediate processing
+  - Medium batches (≤100): Single batch
+  - Large batches (>100): Multi-batch parallel processing
+- Progress tracking for each batch
+- Aggregated status for multi-batch requests
 
-### [API Reference](API-Reference)
-- Endpoints documentation
-- Request/Response formats
-- Error handling
-- Rate limiting
+### Robust Architecture
+- Circuit breaker pattern for SMTP operations
+- Multi-level caching system:
+  - Full validation results
+  - MX records
+  - Blacklist status
+  - Disposable domains
+  - Catch-all domains
+- Fallback SMTP ports (25, 587, 465)
+- Configurable timeouts and retries
 
-### [Configuration Guide](Configuration-Guide)
-- Environment variables
-- Worker settings
-- Cache configuration
-- Queue settings
+### Performance Features
+- Parallel processing with multiple workers
+- Redis-based caching
+- RabbitMQ for reliable message queuing
+- Configurable worker count and batch sizes
 
-### [Deployment Guide](Deployment-Guide)
-- Prerequisites
-- Installation steps
-- Running in production
-- Monitoring
+## Quick Start
 
-### [Troubleshooting](Troubleshooting)
-- Common issues
-- Solutions
-- Debugging tips
-
-## 🚀 Quick Start
-
-1. Clone the repository
+1. Clone the repository:
 ```bash
 git clone https://github.com/hassaanali723/tp-email-verification-tool.git
 cd tp-email-verification-tool
 ```
 
-2. Set up environment
+2. Set up environment:
 ```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
-3. Install dependencies
-```bash
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Start workers
+3. Configure environment variables:
 ```bash
-# Windows
-run_workers.bat
-
-# Linux/Mac
-python run_workers.py
+cp .env.example .env
+# Edit .env with your settings
 ```
 
-5. Start API server
+4. Start services:
 ```bash
-uvicorn main:app --reload
+# Start Redis and RabbitMQ
+# Start workers:
+python run_workers.py  # or run_workers.bat on Windows
+# Start API:
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-## 🔧 System Requirements
+## Documentation
 
+- [Getting Started Guide](Getting-Started): Detailed setup instructions
+- [API Reference](API-Reference): Complete API documentation
+- [Configuration Guide](Configuration-Guide): All configuration options
+- [Deployment Guide](Deployment-Guide): Production deployment instructions
+
+## System Requirements
+
+### Minimum Requirements
 - Python 3.8+
-- Redis
-- RabbitMQ
-- Node.js (for frontend)
+- Redis 6.0+
+- RabbitMQ 3.8+
+- 2GB RAM
+- 2 CPU cores
 
-## 🌟 Key Features
+### Recommended Requirements
+- Python 3.9+
+- Redis 6.2+
+- RabbitMQ 3.9+
+- 4GB RAM
+- 4 CPU cores
 
-- Batch email validation with parallel processing
-- Circuit breaker for SMTP timeout handling
-- Redis caching for validation results
-- RabbitMQ for async processing
-- Configurable worker processes
-- Frontend interface for file uploads
+## Architecture Overview
 
-## 🤝 Contributing
+### Components
+1. **API Layer** (FastAPI)
+   - Request handling
+   - Input validation
+   - Response formatting
+   - Status tracking
 
-See our [Contributing Guide](Contributing) for details on how to:
-- Set up development environment
-- Submit pull requests
-- Report issues
-- Propose new features
+2. **Worker Layer**
+   - Email validation processing
+   - SMTP connections
+   - DNS lookups
+   - Result caching
 
-## 📝 License
+3. **Message Queue** (RabbitMQ)
+   - Task distribution
+   - Load balancing
+   - Retry handling
+   - Dead letter queue
+
+4. **Cache Layer** (Redis)
+   - Result caching
+   - Status tracking
+   - Circuit breaker state
+   - Batch processing state
+
+### Data Flow
+1. Client submits validation request
+2. API processes and queues batch(es)
+3. Workers pick up tasks and process
+4. Results stored in Redis
+5. Client retrieves results via status endpoint
+
+## Configuration Highlights
+
+### Validation Settings
+- DNS timeout: 10 seconds
+- SMTP timeout: 5 seconds
+- Max concurrent validations: 5
+- Multiple SMTP ports: 25, 587, 465
+
+### Circuit Breaker
+- Threshold: 10 failures
+- Recovery timeout: 300 seconds
+- Error threshold: 30%
+- DNS-only mode available
+
+### Caching TTLs
+- Full results: 24 hours
+- MX records: 48 hours
+- Blacklist: 6 hours
+- Disposable: 7 days
+- Catch-all: 24 hours
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## Support
+
+- GitHub Issues: Report bugs and feature requests
+- Documentation: Comprehensive guides and references
+- Examples: Sample code and use cases
+
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
