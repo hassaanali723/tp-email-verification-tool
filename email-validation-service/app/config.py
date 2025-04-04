@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_VALIDATIONS: int = 5
     
     # SMTP Settings
-    SMTP_PORT: int = 23442  # Default SMTP port
+    SMTP_PORT: int = 25  # Default SMTP port
     SMTP_USE_TLS: bool = False  # Whether to use TLS
-    SMTP_FALLBACK_PORTS: List[int] = [24324, 234234]  # Fallback ports if primary fails
+    SMTP_FALLBACK_PORTS: List[int] = [587, 465]  # Fallback ports if primary fails
     
     # Circuit Breaker Settings
     SMTP_CIRCUIT_BREAKER_THRESHOLD: int = 10  # Number of failures before opening circuit
@@ -58,7 +58,11 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None
     REDIS_RESULT_EXPIRY: int = 3600
     
+    # For smaller batches, process directly
+    SMALL_BATCH_THRESHOLD: int = 2
+
     # Worker settings
+    WORKER_COUNT: int = 3           # Number of worker processes to run
     WORKER_BATCH_SIZE: int = 5
     WORKER_PREFETCH_COUNT: int = 1
     MAX_RETRIES: int = 3
