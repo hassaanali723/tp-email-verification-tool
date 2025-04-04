@@ -9,7 +9,6 @@ Before you begin, ensure you have the following installed:
 - Python 3.8 or higher
 - Redis server
 - RabbitMQ server
-- Node.js and npm (for frontend)
 - Git
 
 ## Installation Steps
@@ -24,7 +23,7 @@ cd tp-email-verification-tool
 ### 2. Set Up Python Environment
 
 ```bash
-# Create and activate virtual environment (optional but recommended)
+# Create and activate virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
@@ -34,67 +33,98 @@ pip install -r requirements.txt
 
 ### 3. Configure Environment Variables
 
-1. Copy the example environment file:
-```bash
-cp .env.example .env
-```
+Create a `.env` file in the root directory with the following required settings:
 
-2. Edit `.env` with your settings:
 ```env
 # API Settings
 API_V1_STR=/api/v1
 PROJECT_NAME=Email Validation Service
 
-# Worker Settings
-WORKER_COUNT=4
-WORKER_BATCH_SIZE=5
-WORKER_PREFETCH_COUNT=1
-MAX_RETRIES=3
+# DNS and SMTP Settings
+DNS_TIMEOUT=10
+SMTP_TIMEOUT=5
+MAX_CONCURRENT_VALIDATIONS=5
 
-# Redis Settings
+# SMTP Settings
+SMTP_PORT=25
+SMTP_USE_TLS=False
+SMTP_FALLBACK_PORTS=587,465
+
+# Circuit Breaker Settings
+SMTP_CIRCUIT_BREAKER_THRESHOLD=10
+SMTP_CIRCUIT_BREAKER_TIMEOUT=300
+SMTP_ERROR_THRESHOLD_PERCENTAGE=30
+DNS_ONLY_MODE_ENABLED=False
+
+# Required: RabbitMQ Settings
+RABBITMQ_HOST=localhost
+RABBITMQ_PORT=5672
+RABBITMQ_USER=guest
+RABBITMQ_PASS=guest
+RABBITMQ_VHOST=/
+RABBITMQ_QUEUE=email_validation
+
+# Required: Redis Settings
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_DB=0
-REDIS_PASSWORD=your_password
+REDIS_PASSWORD=
 REDIS_RESULT_EXPIRY=3600
 
-# RabbitMQ Settings
-RABBITMQ_HOST=localhost
-RABBITMQ_PORT=5672
-RABBITMQ_USER=your_user
-RABBITMQ_PASS=your_password
-RABBITMQ_VHOST=/
+# Worker Settings
+WORKER_COUNT=3
+WORKER_BATCH_SIZE=5
+WORKER_PREFETCH_COUNT=1
+MAX_RETRIES=3
 ```
 
 ### 4. Start Required Services
 
-1. **Redis Server**
-```bash
-# Windows
-redis-server
+#### Redis Server
 
-# Linux/Mac
+**Windows**
+```bash
+redis-server
+```
+
+**Linux/Mac**
+```bash
 sudo service redis start
 ```
 
-2. **RabbitMQ Server**
-```bash
-# Windows
-rabbitmq-server
+#### RabbitMQ Server
 
-# Linux/Mac
+**Windows**
+```bash
+rabbitmq-server
+```
+
+**Linux/Mac**
+```bash
 sudo service rabbitmq-server start
 ```
 
 ### 5. Start Worker Processes
 
-```bash
-# Windows
-run_workers.bat
+The service includes two options for running workers:
 
-# Linux/Mac
+#### Option 1: Using the Batch Script (Windows)
+
+```bash
+# From the project root
+run_workers.bat
+```
+
+This will start 4 worker instances in separate windows.
+
+#### Option 2: Using the Python Script (Linux/Mac/Windows)
+
+```bash
+# From the project root
 python run_workers.py
 ```
+
+This will start the configured number of worker processes (default: 3) with proper process management.
 
 ### 6. Start the API Server
 
@@ -104,23 +134,61 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 ## Verifying Installation
 
-1. Check API documentation:
-   - Open `http://localhost:8000/docs` in your browser
-   - You should see the Swagger UI documentation
+### 1. Check API Documentation
 
-2. Test the health endpoint:
-```bash
-curl http://localhost:8000/health
-```
+Open `http://localhost:8000/docs` in your browser to view the Swagger UI documentation.
 
-3. Test email validation:
+### 2. Test Single Email Validation
+
 ```bash
-curl -X POST "http://localhost:8000/api/v1/validate-email" \
+curl -X POST "http://localhost:8000/api/v1/validate" \
      -H "Content-Type: application/json" \
-     -d '{"email": "test@example.com"}'
+     -d '{
+           "emails": ["test@example.com"],
+           "check_mx": true,
+           "check_smtp": true,
+           "check_disposable": true,
+           "check_catch_all": true,
+           "check_blacklist": true
+         }'
 ```
 
-## Common Issues
+### 3. Test Batch Email Validation
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/validate-batch" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "emails": [
+             "test1@example.com",
+             "test2@example.com"
+           ],
+           "check_mx": true,
+           "check_smtp": true,
+           "check_disposable": true,
+           "check_catch_all": true,
+           "check_blacklist": true
+         }'
+```
+
+## Understanding Batch Processing
+
+The service automatically handles different batch sizes:
+
+1. Small batches (≤5 emails):
+   - Processed immediately
+   - Results returned directly
+
+2. Medium batches (≤100 emails):
+   - Processed as a single batch
+   - Returns batch ID for status checking
+
+3. Large batches (>100 emails):
+   - Split into multiple batches
+   - Processed in parallel
+   - Returns request ID for multi-batch status checking
+
+## Common Issues and Solutions
 
 ### Redis Connection Failed
 - Ensure Redis is running
@@ -132,13 +200,45 @@ curl -X POST "http://localhost:8000/api/v1/validate-email" \
 - Check RabbitMQ credentials
 - Verify RabbitMQ port (default: 5672)
 
-### Workers Not Starting
-- Check WORKER_COUNT in .env
-- Ensure Python environment is activated
-- Verify all dependencies are installed
+### Workers Not Processing
+- Check worker processes are running
+- Verify RabbitMQ queue exists
+- Check worker logs for errors
+
+### SMTP Timeouts
+- Adjust SMTP_TIMEOUT in .env
+- Check if target SMTP servers are accessible
+- Consider enabling DNS_ONLY_MODE if persistent issues
 
 ## Next Steps
 
-- Read the [API Reference](API-Reference) for endpoint details
-- Check the [Configuration Guide](Configuration-Guide) for advanced settings
-- See [Deployment Guide](Deployment-Guide) for production deployment
+1. Read the [API Reference](API-Reference) for detailed endpoint documentation
+2. Check the [Configuration Guide](Configuration-Guide) for advanced settings
+3. See the [Deployment Guide](Deployment-Guide) for production setup
+
+## Development Tips
+
+1. Enable debug logging:
+```env
+LOG_LEVEL=DEBUG
+```
+
+2. Monitor worker processes:
+```bash
+# Windows
+tasklist | findstr python
+
+# Linux/Mac
+ps aux | grep run_workers.py
+```
+
+3. Check RabbitMQ queue status:
+```bash
+# Access RabbitMQ management interface
+http://localhost:15672
+```
+
+4. Monitor Redis cache:
+```bash
+redis-cli monitor
+```
