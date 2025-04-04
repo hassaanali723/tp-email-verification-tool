@@ -1,6 +1,6 @@
 # API Reference
 
-This document provides detailed information about the Email Validation Service API endpoints based on the actual implementation.
+This document provides detailed information about the Email Validation Service API endpoints.
 
 ## Base URL
 
@@ -8,46 +8,24 @@ This document provides detailed information about the Email Validation Service A
 http://localhost:8000/api/v1
 ```
 
-## Email Validation Constants
-
-The service maintains several predefined lists for validation:
-
-### Free Email Providers
-- gmail.com, yahoo.com, hotmail.com, outlook.com, aol.com
-- icloud.com, protonmail.com, zoho.com, yandex.com
-
-### Role-Based Email Prefixes
-Common role-based prefixes that are flagged:
-- admin, administrator, support, help, info, contact
-- sales, marketing, billing, accounts, abuse, postmaster
-
-### Disposable Email Domains
-Extensive list including:
-- mailinator.com (and variants)
-- guerrillamail.com (and variants)
-- tempmail.com, throwawaymail.com
-- And many others
-
-## Endpoints
+## Core Endpoints
 
 ### Single Email Validation
 
 ```http
-POST /validate
+POST /validate-email
 ```
 
 Validates a single email address with customizable checks.
 
-**Request Body**
-```json
-{
-    "emails": ["test@example.com"],
-    "check_mx": true,
-    "check_smtp": true,
-    "check_disposable": true,
-    "check_catch_all": true,
-    "check_blacklist": true
-}
+**Query Parameters**
+```
+email: string (required)
+check_mx: boolean (default: true)
+check_smtp: boolean (default: true)
+check_disposable: boolean (default: true)
+check_catch_all: boolean (default: true)
+check_blacklist: boolean (default: true)
 ```
 
 **Response**
@@ -75,10 +53,7 @@ Validates a single email address with customizable checks.
 POST /validate-batch
 ```
 
-Validates multiple email addresses with smart batch processing:
-- Small batches (≤5 emails): Processed immediately
-- Medium batches (≤100 emails): Single batch processing
-- Large batches (>100 emails): Multi-batch parallel processing
+Validates multiple email addresses with smart batch processing.
 
 **Request Body**
 ```json
@@ -95,7 +70,9 @@ Validates multiple email addresses with smart batch processing:
 }
 ```
 
-**Response for Small Batches (≤5 emails)**
+**Response Types**
+
+1. Small Batches (≤5 emails):
 ```json
 {
     "batchId": "uuid",
@@ -112,7 +89,7 @@ Validates multiple email addresses with smart batch processing:
 }
 ```
 
-**Response for Medium/Large Batches**
+2. Medium Batches:
 ```json
 {
     "batchId": "uuid",
@@ -123,49 +100,37 @@ Validates multiple email addresses with smart batch processing:
 }
 ```
 
-**Response for Multi-Batch Processing**
+3. Large Batches (Multi-Batch):
 ```json
 {
     "requestId": "uuid",
+    "batchIds": ["uuid1", "uuid2"],
     "status": "processing",
     "totalEmails": 1000,
-    "totalBatches": 5,
-    "batchIds": ["uuid1", "uuid2", "..."],
+    "processedEmails": 0,
     "estimatedTime": "30 minutes"
 }
 ```
 
-### Batch Processing Details
+## Status Endpoints
 
-The service automatically determines batch sizes based on total email count:
-- ≤100 emails: Single batch
-- ≤500 emails: 100 emails per batch
-- ≤2000 emails: 200 emails per batch
-- >2000 emails: 500 emails per batch
-
-### Status Checking
+### Single Batch Status
 
 ```http
 GET /validation-status/{batch_id}
 ```
 
-Get the status of a batch validation request.
+Get the status of a single batch validation request.
 
 **Response**
 ```json
 {
     "batchId": "uuid",
-    "status": "processing|completed",
+    "status": "completed|processing",
     "totalEmails": 100,
     "processedEmails": 50,
-    "progress": "50/100 (50%)",
-    "results": [
-        {
-            "email": "test@example.com",
-            "is_valid": true,
-            "validation_results": {}
-        }
-    ]
+    "results": [],
+    "lastUpdated": "2024-04-04T12:00:00Z"
 }
 ```
 
@@ -175,12 +140,13 @@ Get the status of a batch validation request.
 GET /multi-validation-status/{request_id}
 ```
 
-Get the status of a multi-batch validation request.
+Get the aggregated status of a multi-batch validation request.
 
 **Response**
 ```json
 {
     "requestId": "uuid",
+    "batchIds": ["uuid1", "uuid2"],
     "status": "processing|completed",
     "totalEmails": 1000,
     "processedEmails": 500,
@@ -191,53 +157,157 @@ Get the status of a multi-batch validation request.
             "status": "completed",
             "processedEmails": 200,
             "totalEmails": 200
-        },
-        {
-            "batchId": "uuid2",
-            "status": "processing",
-            "processedEmails": 150,
-            "totalEmails": 200
         }
-    ]
+    ],
+    "lastUpdated": "2024-04-04T12:00:00Z"
 }
 ```
 
-## Error Handling
+## Circuit Breaker Endpoints
 
-The service uses standard HTTP status codes:
+### Get Circuit Breaker Status
 
-- `400 Bad Request`: Invalid input (e.g., no emails provided)
-- `500 Internal Server Error`: Processing errors (e.g., queue connection failed)
+```http
+GET /circuit-breaker/status
+```
 
-Error Response Format:
+Get the current status of the SMTP circuit breaker.
+
+**Response**
+```json
+{
+    "status": "open|closed",
+    "consecutive_smtp_timeouts": 5,
+    "timeout_threshold": 10,
+    "is_open": true,
+    "last_timeout": "2024-04-04T12:00:00Z",
+    "total_timeouts": 15,
+    "total_dns_fallbacks": 10,
+    "dns_only_mode": false
+}
+```
+
+### Reset Circuit Breaker
+
+```http
+POST /circuit-breaker/reset
+```
+
+Reset the circuit breaker to closed state.
+
+**Response**
+```json
+{
+    "status": "success",
+    "message": "Circuit breaker reset successfully"
+}
+```
+
+## Cache Management Endpoints
+
+### View Cache
+
+```http
+GET /cache/view/{cache_type}
+```
+
+View cached results by type. Available types: `full`, `mx`, `blacklist`, `disposable`, `catch_all`
+
+**Response**
+```json
+{
+    "cache_type": "mx",
+    "total_entries": 100,
+    "entries": {
+        "email_validation:mx:example.com": {
+            "mx_records": ["mx.example.com"],
+            "timestamp": "2024-04-04T12:00:00Z"
+        }
+    }
+}
+```
+
+### Clear Cache
+
+```http
+DELETE /cache/clear/{cache_type}
+```
+
+Clear cache by type. Available types: `full`, `mx`, `blacklist`, `disposable`, `catch_all`, `all`
+
+**Response**
+```json
+{
+    "cache_type": "mx",
+    "cleared_entries": 100,
+    "message": "Successfully cleared 100 cache entries"
+}
+```
+
+## Testing Endpoints
+
+### Test DNS Validation
+
+```http
+POST /test-dns-validation
+```
+
+Test endpoint for DNS-only validation, bypassing SMTP checks.
+
+**Query Parameters**
+```
+email: string (required)
+```
+
+**Response**
+```json
+{
+    "email": "test@example.com",
+    "is_valid": true,
+    "validation_results": {
+        "format_valid": true,
+        "mx_found": true
+    },
+    "mx_records": ["mx.example.com"]
+}
+```
+
+## Error Responses
+
+Standard error response format:
+
 ```json
 {
     "detail": "Error message"
 }
 ```
 
-## Circuit Breaker
+Common status codes:
+- `400 Bad Request`: Invalid input (e.g., no emails provided)
+- `404 Not Found`: Batch or request ID not found
+- `500 Internal Server Error`: Processing errors
 
-The service implements a circuit breaker pattern for SMTP operations:
-- Prevents overloading SMTP servers
-- Automatically switches to DNS-only mode when needed
-- Configurable thresholds and timeouts
+## Batch Processing Details
 
-## Caching
+The service automatically determines batch sizes based on total email count:
+- ≤5 emails: Immediate processing
+- ≤100 emails: Single batch
+- ≤500 emails: 100 emails per batch
+- ≤2000 emails: 200 emails per batch
+- >2000 emails: 500 emails per batch
 
-The service implements multi-level caching:
-- Full validation results
-- MX records
-- Blacklist status
-- Disposable domain status
-- Catch-all domain status
+## Circuit Breaker Behavior
 
-Each cache type has its own TTL and can be independently enabled/disabled.
+The circuit breaker protects the service from SMTP timeouts:
+1. Opens after consecutive SMTP timeouts
+2. Falls back to DNS-only validation when open
+3. Automatically attempts recovery after timeout period
+4. Can be manually reset via API endpoint
 
-## Dependencies
+## Cache Types and TTLs
 
-The service relies on:
-- Redis for caching and result storage
-- RabbitMQ for task queuing
-- DNS servers for MX record validation
-- SMTP servers for email validation
+- Full Results: 24 hours
+- MX Records: 48 hours
+- Blacklist: 6 hours
+- Disposable: 7 days
+- Catch-all: 24 hours
