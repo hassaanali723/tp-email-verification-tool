@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 from enum import Enum
 
 class ValidationStatus(str, Enum):
@@ -78,6 +78,15 @@ class BatchValidationResponse(BaseModel):
     estimatedTime: Optional[str] = None
     results: Optional[List[EmailValidationResult]] = None
 
+class MultiBatchResponse(BaseModel):
+    requestId: str
+    batchIds: List[str]
+    status: str  # "processing" or "completed"
+    totalEmails: int
+    processedEmails: int = 0
+    estimatedTime: Optional[str] = None
+    isMultiBatch: bool = True
+
 class ValidationStatusResponse(BaseModel):
     batchId: str
     status: str  # "processing" or "completed"
@@ -85,4 +94,15 @@ class ValidationStatusResponse(BaseModel):
     totalEmails: Optional[int] = None
     processedEmails: Optional[int] = None
     results: Optional[List[EmailValidationResult]] = None
+    lastUpdated: Optional[str] = None
+
+class MultiStatusResponse(BaseModel):
+    requestId: str
+    batchIds: List[str]
+    status: str  # "processing" or "completed"
+    totalEmails: int
+    processedEmails: int
+    progress: Optional[str] = None
+    isMultiBatch: bool = True
+    batches: Optional[List[Dict[str, Any]]] = None
     lastUpdated: Optional[str] = None 

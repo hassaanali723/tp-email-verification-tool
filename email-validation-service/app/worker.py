@@ -140,6 +140,10 @@ class EmailValidationWorker:
             json.dumps(final_results)
         )
         
+        # Get circuit breaker metrics for logging
+        metrics = self.validator.circuit_breaker.get_metrics()
+        logger.info(f"Batch {batch_id} completed. Circuit breaker status: {metrics['status']}, Consecutive timeouts: {metrics['consecutive_smtp_timeouts']}")
+        
         # Reset circuit breaker at the end of the batch
         self.validator.circuit_breaker.reset()
         

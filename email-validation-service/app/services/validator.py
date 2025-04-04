@@ -226,13 +226,24 @@ class EmailValidator:
                             # Record SMTP timeout in circuit breaker
                             self.circuit_breaker.record_smtp_timeout()
                             
-                            # Fall back to DNS validation
-                            logger.warning(f"SMTP timeout for {email}, falling back to DNS validation")
-                            self.circuit_breaker.record_dns_fallback()
-                            dns_result = await self.dns_validator.validate(email)
-                            dns_result.details.general["validation_method"] = "dns"
-                            dns_result.details.general["reason"] += " (SMTP timeout fallback)"
-                            return dns_result
+                            # Only fall back to DNS validation if circuit breaker is open
+                            if self.circuit_breaker.is_open:
+                                logger.warning(f"Circuit breaker is open, falling back to DNS validation for {email}")
+                                self.circuit_breaker.record_dns_fallback()
+                                dns_result = await self.dns_validator.validate(email)
+                                dns_result.details.general["validation_method"] = "dns"
+                                dns_result.details.general["reason"] += " (Circuit breaker open - DNS fallback)"
+                                return dns_result
+                            else:
+                                # If circuit is not open, return UNKNOWN with TIMEOUT reason
+                                result.status = ValidationStatus.UNKNOWN
+                                result.details.general["reason"] = "SMTP timeout"
+                                result.details.sub_status = UnknownReason.TIMEOUT
+                                logger.warning(f"SMTP timeout for {email}, circuit still closed")
+                                return result
+                        else:
+                            # Record successful SMTP validation to reset consecutive timeout counter
+                            self.circuit_breaker.record_smtp_success()
                         
                         # Process normal SMTP result
                         if smtp_result.get("exists") is True:
@@ -258,13 +269,21 @@ class EmailValidator:
                         # Record SMTP timeout in circuit breaker
                         self.circuit_breaker.record_smtp_timeout()
                         
-                        # Fall back to DNS validation
-                        logger.warning(f"SMTP timeout for {email}, falling back to DNS validation")
-                        self.circuit_breaker.record_dns_fallback()
-                        dns_result = await self.dns_validator.validate(email)
-                        dns_result.details.general["validation_method"] = "dns"
-                        dns_result.details.general["reason"] += " (SMTP timeout fallback)"
-                        return dns_result
+                        # Only fall back to DNS validation if circuit breaker is open
+                        if self.circuit_breaker.is_open:
+                            logger.warning(f"Circuit breaker is open, falling back to DNS validation for {email}")
+                            self.circuit_breaker.record_dns_fallback()
+                            dns_result = await self.dns_validator.validate(email)
+                            dns_result.details.general["validation_method"] = "dns"
+                            dns_result.details.general["reason"] += " (Circuit breaker open - DNS fallback)"
+                            return dns_result
+                        else:
+                            # If circuit is not open, return UNKNOWN with TIMEOUT reason
+                            result.status = ValidationStatus.UNKNOWN
+                            result.details.general["reason"] = "SMTP timeout"
+                            result.details.sub_status = UnknownReason.TIMEOUT
+                            logger.warning(f"SMTP timeout for {email}, circuit still closed")
+                            return result
                     except Exception as e:
                         error_str = str(e).lower()
                         # Only record timeout for connection-related errors
@@ -276,14 +295,29 @@ class EmailValidator:
                             "reset" in error_str):
                             logger.warning(f"SMTP connection error for {email}: {str(e)}")
                             self.circuit_breaker.record_smtp_timeout()
-                            self.circuit_breaker.record_dns_fallback()
-                        
-                        # Fall back to DNS validation
-                        logger.warning(f"SMTP error for {email}: {str(e)}, falling back to DNS validation")
-                        dns_result = await self.dns_validator.validate(email)
-                        dns_result.details.general["validation_method"] = "dns"
-                        dns_result.details.general["reason"] += f" (SMTP error fallback: {str(e)})"
-                        return dns_result
+                            
+                            # Only fall back to DNS validation if circuit breaker is open
+                            if self.circuit_breaker.is_open:
+                                logger.warning(f"Circuit breaker is open, falling back to DNS validation for {email}")
+                                self.circuit_breaker.record_dns_fallback()
+                                dns_result = await self.dns_validator.validate(email)
+                                dns_result.details.general["validation_method"] = "dns"
+                                dns_result.details.general["reason"] += " (Circuit breaker open - DNS fallback)"
+                                return dns_result
+                            else:
+                                # If circuit is not open, return UNKNOWN with error reason
+                                result.status = ValidationStatus.UNKNOWN
+                                result.details.general["reason"] = f"SMTP error: {str(e)}"
+                                result.details.sub_status = UnknownReason.UNEXPECTED_ERROR
+                                logger.warning(f"SMTP error for {email}, circuit still closed")
+                                return result
+                        else:
+                            # For non-connection errors, don't increment circuit breaker
+                            logger.warning(f"SMTP error for {email}: {str(e)}, using DNS validation")
+                            dns_result = await self.dns_validator.validate(email)
+                            dns_result.details.general["validation_method"] = "dns"
+                            dns_result.details.general["reason"] += f" (SMTP error fallback: {str(e)})"
+                            return dns_result
 
             # STEP 6: Catch-All Check (Optional)
             if check_catch_all and mx_records:

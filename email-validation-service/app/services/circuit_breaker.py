@@ -8,16 +8,16 @@ logger = logging.getLogger(__name__)
 class CircuitBreaker:
     """
     Circuit breaker implementation for SMTP validation service.
-    Tracks SMTP timeouts and switches to DNS validation after threshold is reached.
+    Tracks CONSECUTIVE SMTP timeouts and switches to DNS validation after threshold is reached.
     Designed to work across multiple worker processes by using Redis for state.
     """
     
     def __init__(self, redis_client: redis.Redis):
         self.redis = redis_client
-        self.failure_threshold = 10  # Fixed threshold for simplicity
+        self.failure_threshold = settings.SMTP_CIRCUIT_BREAKER_THRESHOLD
         
         # Redis keys
-        self.failures_key = "smtp_timeout_failures"
+        self.consecutive_failures_key = "smtp_consecutive_timeout_failures"
         self.status_key = "smtp_circuit_status"
         self.last_timeout_key = "smtp_last_timeout"
         
@@ -27,7 +27,7 @@ class CircuitBreaker:
         
         # Set expiration for circuit breaker keys (in seconds)
         # This ensures the circuit will reset after this time period
-        self.key_expiry = 3600  # 1 hour
+        self.key_expiry = settings.SMTP_CIRCUIT_BREAKER_TIMEOUT
     
     @property
     def is_open(self) -> bool:
@@ -59,31 +59,31 @@ class CircuitBreaker:
             while True:
                 try:
                     # Watch the keys we're going to modify
-                    pipe.watch(self.failures_key, self.status_key)
+                    pipe.watch(self.consecutive_failures_key, self.status_key)
                     
                     # Get current values
-                    current_failures = int(pipe.get(self.failures_key) or 0)
+                    current_consecutive_failures = int(pipe.get(self.consecutive_failures_key) or 0)
                     current_status = pipe.get(self.status_key)
                     
                     # Start transaction
                     pipe.multi()
                     
-                    # Increment failure counter
-                    new_failure_count = current_failures + 1
-                    pipe.set(self.failures_key, new_failure_count)
-                    pipe.expire(self.failures_key, self.key_expiry)
+                    # Increment consecutive failure counter
+                    new_failure_count = current_consecutive_failures + 1
+                    pipe.set(self.consecutive_failures_key, new_failure_count)
+                    pipe.expire(self.consecutive_failures_key, self.key_expiry)
                     
                     # Set last timeout timestamp
                     now = datetime.now().isoformat()
                     pipe.set(self.last_timeout_key, now)
                     pipe.expire(self.last_timeout_key, self.key_expiry)
                     
-                    # Increment total timeouts counter
+                    # Increment total timeouts counter (historical)
                     pipe.incr(self.total_timeouts_key)
                     
-                    # Check if we should open the circuit
+                    # Check if we should open the circuit - ONLY if we have CONSECUTIVE failures
                     if new_failure_count >= self.failure_threshold and current_status != "open":
-                        logger.warning(f"SMTP timeout threshold reached ({new_failure_count}/{self.failure_threshold}), opening circuit")
+                        logger.warning(f"CONSECUTIVE SMTP timeout threshold reached ({new_failure_count}/{self.failure_threshold}), opening circuit")
                         pipe.set(self.status_key, "open")
                         pipe.expire(self.status_key, self.key_expiry)
                     
@@ -91,7 +91,7 @@ class CircuitBreaker:
                     pipe.execute()
                     
                     # Log the current state
-                    logger.info(f"SMTP timeout recorded. Current count: {new_failure_count}/{self.failure_threshold}, Status: {'open' if current_status == 'open' else 'closed'}, Time: {now}")
+                    logger.info(f"SMTP timeout recorded. Consecutive count: {new_failure_count}/{self.failure_threshold}, Status: {'open' if current_status == 'open' else 'closed'}, Time: {now}")
                     
                     break
                     
@@ -99,6 +99,15 @@ class CircuitBreaker:
                     # Another client modified the keys, retry
                     logger.warning("Redis WatchError occurred, retrying transaction")
                     continue
+    
+    def record_smtp_success(self):
+        """
+        Record a successful SMTP validation - resets the consecutive failure counter
+        """
+        # Reset consecutive failures counter when a successful validation occurs
+        self.redis.set(self.consecutive_failures_key, 0)
+        self.redis.expire(self.consecutive_failures_key, self.key_expiry)
+        logger.info("SMTP validation successful, reset consecutive timeout counter")
     
     def record_dns_fallback(self):
         """
@@ -119,8 +128,8 @@ class CircuitBreaker:
         Reset the circuit breaker state
         """
         pipe = self.redis.pipeline()
-        pipe.set(self.failures_key, 0)
-        pipe.expire(self.failures_key, self.key_expiry)
+        pipe.set(self.consecutive_failures_key, 0)
+        pipe.expire(self.consecutive_failures_key, self.key_expiry)
         pipe.set(self.status_key, "closed")
         pipe.expire(self.status_key, self.key_expiry)
         pipe.execute()
@@ -132,7 +141,7 @@ class CircuitBreaker:
         Get current circuit breaker metrics
         """
         pipe = self.redis.pipeline()
-        pipe.get(self.failures_key)
+        pipe.get(self.consecutive_failures_key)
         pipe.get(self.status_key)
         pipe.get(self.last_timeout_key)
         pipe.get(self.total_timeouts_key)

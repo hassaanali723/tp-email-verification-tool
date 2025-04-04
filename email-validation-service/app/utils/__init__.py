@@ -1,3 +1,1 @@
-"""
-Utility modules for the email validation service.
-""" 
+# Utils package for email validation service 
