@@ -1,232 +1,183 @@
 # Configuration Guide
 
-This guide explains all configuration options available in the Email Validation Service.
+This guide explains all configuration options available in the Email Validation Service based on the actual implementation.
 
 ## Environment Variables
 
 The service uses environment variables for configuration. Create a `.env` file in the root directory with the following options:
 
-### Core Settings
+### Core API Settings
 
 ```env
-# API Configuration
 API_V1_STR=/api/v1
 PROJECT_NAME=Email Validation Service
-DEBUG=True
-ENVIRONMENT=development  # development, staging, production
-
-# Security
-SECRET_KEY=your-secret-key
-ALLOWED_HOSTS=localhost,127.0.0.1
-CORS_ORIGINS=http://localhost:3000,http://localhost:8000
-```
-
-### Worker Configuration
-
-```env
-# Worker Settings
-WORKER_COUNT=4                # Number of worker processes
-WORKER_BATCH_SIZE=5          # Number of emails per batch
-WORKER_PREFETCH_COUNT=1      # Number of messages to prefetch
-MAX_RETRIES=3               # Maximum retry attempts for failed validations
-RETRY_DELAY=5               # Delay between retries (seconds)
-```
-
-### Redis Configuration
-
-```env
-# Redis Settings
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-REDIS_PASSWORD=your_password
-REDIS_RESULT_EXPIRY=3600    # Result cache expiry (seconds)
-REDIS_SSL=False
-REDIS_DECODE_RESPONSES=True
-```
-
-### RabbitMQ Configuration
-
-```env
-# RabbitMQ Settings
-RABBITMQ_HOST=localhost
-RABBITMQ_PORT=5672
-RABBITMQ_USER=guest
-RABBITMQ_PASS=guest
-RABBITMQ_VHOST=/
-RABBITMQ_SSL=False
-RABBITMQ_QUEUE_NAME=email_validation
-RABBITMQ_EXCHANGE=email_validation_exchange
-RABBITMQ_ROUTING_KEY=email_validation
 ```
 
 ### Email Validation Settings
 
 ```env
-# Validation Settings
-SMTP_TIMEOUT=10             # SMTP connection timeout (seconds)
-DISPOSABLE_CHECK=True       # Enable disposable email check
-CATCH_ALL_CHECK=True        # Enable catch-all domain check
-MX_CHECK=True              # Enable MX record check
-FORMAT_CHECK=True          # Enable email format check
+# DNS and SMTP Timeouts
+DNS_TIMEOUT=10              # DNS lookup timeout in seconds
+SMTP_TIMEOUT=5             # SMTP connection timeout in seconds
+MAX_CONCURRENT_VALIDATIONS=5
+
+# SMTP Configuration
+SMTP_PORT=25               # Default SMTP port
+SMTP_USE_TLS=False        # Whether to use TLS
+SMTP_FALLBACK_PORTS=587,465  # Fallback ports if primary fails
 ```
 
-### Rate Limiting
+### Circuit Breaker Settings
 
 ```env
-# Rate Limiting
-RATE_LIMIT_ENABLED=True
-RATE_LIMIT_SINGLE=60       # Requests per minute for single validation
-RATE_LIMIT_BATCH=10        # Requests per minute for batch validation
-RATE_LIMIT_STATUS=120      # Requests per minute for status checks
+# Circuit Breaker Configuration
+SMTP_CIRCUIT_BREAKER_THRESHOLD=10   # Number of failures before opening circuit
+SMTP_CIRCUIT_BREAKER_TIMEOUT=300    # Seconds to wait before attempting recovery
+SMTP_ERROR_THRESHOLD_PERCENTAGE=30   # Percentage of errors to trigger circuit
+DNS_ONLY_MODE_ENABLED=False         # Emergency switch for DNS-only mode
 ```
 
-### Logging Configuration
+### Cache Settings
 
 ```env
-# Logging
-LOG_LEVEL=INFO             # DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_FORMAT=json            # json or text
-LOG_FILE=app.log          # Log file path
+# Cache TTLs (in seconds)
+CACHE_TTL_FULL_RESULT=86400     # 24 hours
+CACHE_TTL_MX_RECORDS=172800     # 48 hours
+CACHE_TTL_BLACKLIST=21600       # 6 hours
+CACHE_TTL_DISPOSABLE=604800     # 7 days
+CACHE_TTL_CATCH_ALL=86400       # 24 hours
+CATCH_ALL_CACHE_TTL=3600        # 1 hour
+
+# Cache Control Flags
+ENABLE_RESULT_CACHE=True
+ENABLE_MX_CACHE=True
+ENABLE_BLACKLIST_CACHE=True
+ENABLE_DISPOSABLE_CACHE=True
+ENABLE_CATCH_ALL_CACHE=True
+
+# Cache Keys
+CACHE_KEY_PREFIX=email_validation:
+```
+
+### RabbitMQ Configuration
+
+```env
+# Required Settings
+RABBITMQ_HOST=localhost          # Required
+RABBITMQ_PORT=5672
+RABBITMQ_USER=guest             # Required
+RABBITMQ_PASS=guest             # Required
+RABBITMQ_VHOST=/
+RABBITMQ_QUEUE=email_validation
+RABBITMQ_DLQ=email_validation_dlq  # Dead Letter Queue
+```
+
+### Redis Configuration
+
+```env
+# Required Settings
+REDIS_HOST=localhost            # Required
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=                 # Optional
+REDIS_RESULT_EXPIRY=3600       # 1 hour
+```
+
+### Worker Configuration
+
+```env
+WORKER_COUNT=3                  # Number of worker processes
+WORKER_BATCH_SIZE=5            # Emails per batch
+WORKER_PREFETCH_COUNT=1        # Messages to prefetch
+MAX_RETRIES=3                  # Maximum retry attempts
 ```
 
 ## Configuration Precedence
 
+The service uses pydantic-settings for configuration management. The precedence order is:
+
 1. Environment variables
 2. `.env` file
-3. Default values
+3. Default values specified in the Settings class
 
-## Advanced Configuration
+## Required Environment Variables
 
-### Circuit Breaker Settings
+The following environment variables MUST be set:
+- `RABBITMQ_HOST`
+- `RABBITMQ_USER`
+- `RABBITMQ_PASS`
+- `REDIS_HOST`
 
-The circuit breaker prevents overloading SMTP servers:
+## Cache System
 
-```env
-# Circuit Breaker
-CB_FAILURE_THRESHOLD=5     # Number of failures before opening
-CB_RECOVERY_TIMEOUT=60     # Time before attempting recovery (seconds)
-CB_EXPECTED_EXCEPTION=SMTPException  # Exception types to count
-```
+The service implements a sophisticated caching system with different TTLs for various types of data:
 
-### Cache Configuration
+1. **Full Result Cache** (24 hours)
+   - Stores complete validation results
+   - Helps avoid redundant validations
 
-Configure caching behavior for validation results:
+2. **MX Records Cache** (48 hours)
+   - Caches DNS MX record lookups
+   - Reduces DNS query load
 
-```env
-# Cache Settings
-CACHE_TYPE=redis           # redis or memory
-CACHE_TTL=3600            # Cache TTL in seconds
-CACHE_MAX_SIZE=10000      # Maximum cache entries
-```
+3. **Blacklist Cache** (6 hours)
+   - Stores known invalid domains
+   - Quick rejection of invalid emails
 
-### Worker Queue Settings
+4. **Disposable Email Cache** (7 days)
+   - Caches disposable email domain checks
+   - Long TTL due to infrequent changes
 
-Fine-tune worker queue behavior:
+5. **Catch-All Domain Cache** (24 hours)
+   - Stores catch-all domain status
+   - Balanced TTL for accuracy and performance
 
-```env
-# Queue Settings
-QUEUE_MAX_PRIORITY=10     # Maximum message priority
-QUEUE_DURABLE=True        # Persist queue across restarts
-QUEUE_AUTO_DELETE=False   # Delete queue when unused
-```
+## Circuit Breaker Implementation
 
-### Webhook Settings
+The service includes a circuit breaker pattern for SMTP operations:
 
-Configure webhook notifications:
+1. **Threshold**: Opens after 10 failures
+2. **Recovery**: 5-minute timeout before recovery attempt
+3. **Error Rate**: Triggers at 30% error rate
+4. **DNS Fallback**: Can switch to DNS-only mode in emergencies
 
-```env
-# Webhook Settings
-WEBHOOK_TIMEOUT=5         # Webhook request timeout
-WEBHOOK_RETRY_COUNT=3     # Number of retry attempts
-WEBHOOK_RETRY_DELAY=5     # Delay between retries (seconds)
-```
+## SMTP Configuration
 
-## Environment-Specific Configurations
+The service uses a multi-port strategy for SMTP connections:
+
+1. Primary port: 25 (default SMTP)
+2. Fallback ports: 587 (submission), 465 (SMTPS)
+3. TLS support can be enabled/disabled
+
+## Worker Configuration
+
+Worker settings are optimized for balanced performance:
+
+1. **Concurrency**: 3 worker processes by default
+2. **Batch Processing**: 5 emails per batch
+3. **Message Prefetch**: 1 message at a time
+4. **Retry Logic**: Maximum 3 retry attempts
+
+## Environment-Specific Recommendations
 
 ### Development
-
 ```env
-DEBUG=True
-ENVIRONMENT=development
-LOG_LEVEL=DEBUG
-CORS_ORIGINS=*
-```
-
-### Staging
-
-```env
-DEBUG=False
-ENVIRONMENT=staging
-LOG_LEVEL=INFO
-CORS_ORIGINS=https://staging.yourdomain.com
+DNS_TIMEOUT=20
+SMTP_TIMEOUT=10
+ENABLE_RESULT_CACHE=False
 ```
 
 ### Production
-
 ```env
-DEBUG=False
-ENVIRONMENT=production
-LOG_LEVEL=WARNING
-CORS_ORIGINS=https://yourdomain.com
-REDIS_SSL=True
-RABBITMQ_SSL=True
+DNS_TIMEOUT=10
+SMTP_TIMEOUT=5
+SMTP_CIRCUIT_BREAKER_THRESHOLD=10
+ENABLE_RESULT_CACHE=True
 ```
 
-## Security Recommendations
-
-1. Always use strong passwords for Redis and RabbitMQ
-2. Enable SSL in production
-3. Restrict CORS origins
-4. Use a secure SECRET_KEY
-5. Enable rate limiting
-
-## Monitoring Configuration
-
+### High-Load Production
 ```env
-# Monitoring
-ENABLE_METRICS=True       # Enable Prometheus metrics
-METRICS_PORT=9090        # Metrics server port
-HEALTH_CHECK_INTERVAL=30 # Health check interval (seconds)
+WORKER_COUNT=6
+WORKER_BATCH_SIZE=10
+MAX_CONCURRENT_VALIDATIONS=10
 ```
-
-## Example Configurations
-
-### Minimal Configuration
-
-```env
-API_V1_STR=/api/v1
-REDIS_HOST=localhost
-RABBITMQ_HOST=localhost
-```
-
-### Production Configuration
-
-```env
-API_V1_STR=/api/v1
-ENVIRONMENT=production
-DEBUG=False
-LOG_LEVEL=WARNING
-
-REDIS_HOST=redis.production
-REDIS_SSL=True
-REDIS_PASSWORD=strong-password
-
-RABBITMQ_HOST=rabbitmq.production
-RABBITMQ_SSL=True
-RABBITMQ_USER=production-user
-RABBITMQ_PASS=strong-password
-
-WORKER_COUNT=8
-RATE_LIMIT_ENABLED=True
-```
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. Check log files for errors
-2. Verify environment variables are set correctly
-3. Ensure services (Redis, RabbitMQ) are running
-4. Check connectivity and credentials
-5. Verify SSL settings if enabled
