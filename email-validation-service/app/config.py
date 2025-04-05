@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     REDIS_RESULT_EXPIRY: int = 3600
     
     # For smaller batches, process directly
-    SMALL_BATCH_THRESHOLD: int = 2
+    SMALL_BATCH_THRESHOLD: int = 1
 
     # Worker settings
     WORKER_COUNT: int = 3           # Number of worker processes to run
