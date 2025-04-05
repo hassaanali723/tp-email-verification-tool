@@ -112,11 +112,18 @@ class EmailValidationWorker:
                     "lastUpdated": datetime.utcnow().isoformat()
                 }
                 
+                # Store in Redis for status checks
                 await self.redis.setex(
                     f"validation_results:{batch_id}",
                     settings.REDIS_RESULT_EXPIRY,
                     json.dumps(progress)
                 )
+
+                # Publish progress update
+                try:
+                    await self.redis.publish('email_validation_results', json.dumps(progress))
+                except Exception as e:
+                    logger.error(f"Error publishing progress update: {str(e)}")
                 
                 logger.info(f"Processed chunk {i+1}/{len(chunks)} for batch {batch_id}")
                 
@@ -134,11 +141,18 @@ class EmailValidationWorker:
             "lastUpdated": datetime.utcnow().isoformat()
         }
         
+        # Store final results in Redis
         await self.redis.setex(
             f"validation_results:{batch_id}",
             settings.REDIS_RESULT_EXPIRY,
             json.dumps(final_results)
         )
+
+        # Publish final results
+        try:
+            await self.redis.publish('email_validation_results', json.dumps(final_results))
+        except Exception as e:
+            logger.error(f"Error publishing final results: {str(e)}")
         
         # Get circuit breaker metrics for logging
         metrics = self.validator.circuit_breaker.get_metrics()

@@ -27,14 +27,16 @@ def split_into_batches(emails: List[str]) -> List[List[str]]:
     # Determine batch size based on total email count
     if total_emails <= 20:
         return [emails]  # Single batch for small uploads
+    elif total_emails <= 100:
+        batch_size = 30 
     elif total_emails <= 200:
         batch_size = 50 
     elif total_emails <= 500:
         batch_size = 100  # 20 emails per batch for medium uploads
     elif total_emails <= 1000:
-        batch_size = 200  # 50 emails per batch for large uploads
+        batch_size = 150  # 50 emails per batch for large uploads
     else:
-        batch_size = 300  # 100 emails per batch for very large uploads
+        batch_size = 200  # 100 emails per batch for very large uploads
     
     # Split emails into batches
     return [emails[i:i+batch_size] for i in range(0, len(emails), batch_size)]
