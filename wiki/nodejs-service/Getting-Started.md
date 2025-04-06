@@ -6,104 +6,52 @@
    - Node.js (v14 or higher)
    - MongoDB (v4.4 or higher)
    - Redis (v6 or higher)
-   - npm or yarn package manager
+   - Python (v3.8 or higher) - Required for email validation service
 
 2. **System Requirements**
    - Memory: 2GB RAM minimum
    - Storage: 1GB free space
-   - CPU: 1 core minimum
+   - Network: Internet connection for email validation
 
 ## Installation
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/your-repo/email-verification-tool.git
+   git clone https://github.com/hassaanali723/tp-email-verification-tool.git
    cd email-verification-tool/backend
    ```
 
 2. **Install Dependencies**
    ```bash
    npm install
-   # or
-   yarn install
    ```
 
 3. **Configure Environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
+   Create a `.env` file based on `.env.example`:
+   ```env
+   # Server Configuration
+   PORT=5000
+   NODE_ENV=development
+
+   # MongoDB Configuration
+   MONGO_URI=mongodb://localhost:27017/email-validator
+
+   # Storage Configuration
+   UPLOAD_DIR=./uploads
+   MAX_FILE_SIZE=10485760 # 10MB in bytes
+   ALLOWED_FILE_TYPES=.csv,.xlsx,.xls,.txt
+
+   # Email Validation Service
+   EMAIL_VALIDATION_API_URL=http://localhost:8000/api/v1 
+
+   # Redis Configuration
+   REDIS_HOST=localhost
+   REDIS_PORT=6379
+   REDIS_PASSWORD=
+   REDIS_CHANNEL_VALIDATION=email_validation_results
    ```
 
 ## Running the Service
-
-1. **Development Mode**
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   ```
-
-2. **Production Mode**
-   ```bash
-   npm start
-   # or
-   yarn start
-   ```
-
-## Testing
-
-1. **Run Tests**
-   ```bash
-   npm test
-   # or
-   yarn test
-   ```
-
-2. **Test Coverage**
-   ```bash
-   npm run coverage
-   # or
-   yarn coverage
-   ```
-
-## Development Setup
-
-1. **Code Linting**
-   ```bash
-   npm run lint
-   # or
-   yarn lint
-   ```
-
-2. **Code Formatting**
-   ```bash
-   npm run format
-   # or
-   yarn format
-   ```
-
-## Directory Structure
-
-```
-backend/
-├── config/
-│   ├── database.js
-│   └── redis.js
-├── models/
-│   ├── EmailResults.js
-│   └── EmailBatches.js
-├── routes/
-│   └── emailValidation.js
-├── services/
-│   ├── redisService.js
-│   └── statisticsService.js
-├── utils/
-│   └── logger.js
-├── app.js
-└── package.json
-```
-
-## Quick Start Guide
 
 1. **Start Required Services**
    ```bash
@@ -112,31 +60,105 @@ backend/
 
    # Start Redis
    redis-server
+
+   # Start FastAPI Email Validation Service
+   # (Follow FastAPI service setup instructions)
    ```
 
-2. **Run the Application**
+2. **Start the Application**
    ```bash
+   # Development mode with auto-reload
    npm run dev
+
+   # Production mode
+   npm start
    ```
 
-3. **Verify Installation**
-   ```bash
-   curl http://localhost:3000/health
-   # Should return: {"status":"ok"}
-   ```
+## Project Structure
 
-## Common Issues
+```
+backend/
+├── app.js                 # Main application entry point
+├── routes/
+│   ├── emailValidation.js # Email validation endpoints
+│   └── fileRoutes.js      # File upload and processing routes
+├── services/
+│   ├── emailValidationService.js # Email validation logic
+│   ├── fileProcessingService.js  # File processing logic
+│   ├── redisService.js          # Redis pub/sub handling
+│   ├── statisticsService.js     # Statistics calculation
+│   └── storageService.js        # File storage management
+├── models/
+│   ├── EmailResults.js    # Email validation results schema
+│   └── EmailBatches.js    # Batch processing schema
+├── utils/
+│   └── logger.js          # Winston logger configuration
+└── uploads/               # File upload directory
+```
 
-1. **MongoDB Connection**
-   - Ensure MongoDB is running
-   - Check connection string in .env
-   - Verify network connectivity
+## Key Features
 
-2. **Redis Connection**
-   - Ensure Redis server is running
-   - Check Redis URL in .env
-   - Verify port availability
+1. **File Processing**
+   - Supports CSV, Excel, and text files
+   - Handles large file uploads
+   - Processes emails in batches
 
-3. **Port Conflicts**
-   - Check if port 3000 is available
-   - Configure different port in .env if needed
+2. **Email Validation**
+   - Real-time validation status
+   - Batch processing support
+   - Detailed validation results
+
+3. **Real-time Updates**
+   - Redis pub/sub for live updates
+   - Progress tracking
+   - Statistics calculation
+
+## Available Scripts
+
+- `npm start`: Run in production mode
+- `npm run dev`: Run in development mode with nodemon
+
+## Dependencies
+
+Key packages used:
+- `express`: Web framework
+- `mongoose`: MongoDB ODM
+- `ioredis`: Redis client
+- `multer`: File upload handling
+- `csv-parser` & `xlsx`: File parsing
+- `winston`: Logging
+- `bull`: Job queue (if implemented)
+
+## Common Issues & Solutions
+
+1. **MongoDB Connection Issues**
+   - Ensure MongoDB is running: `mongod`
+   - Check MongoDB URI in `.env`
+   - Verify MongoDB port is available (default: 27017)
+
+2. **Redis Connection Issues**
+   - Ensure Redis server is running: `redis-server`
+   - Check Redis configuration in `.env`
+   - Verify Redis port is available (default: 6379)
+
+3. **File Upload Issues**
+   - Check upload directory permissions
+   - Verify file size limits
+   - Ensure supported file types
+
+4. **Email Validation Service Connection**
+   - Verify FastAPI service is running
+   - Check EMAIL_VALIDATION_API_URL in `.env`
+   - Ensure network connectivity
+
+## Next Steps
+
+1. Set up the FastAPI email validation service
+2. Configure MongoDB and Redis
+3. Test file upload functionality
+4. Monitor real-time updates
+
+For more detailed information, refer to:
+- [API Reference](./API-Reference.md)
+- [Architecture Overview](./Architecture-Overview.md)
+- [Configuration Guide](./Configuration-Guide.md)
