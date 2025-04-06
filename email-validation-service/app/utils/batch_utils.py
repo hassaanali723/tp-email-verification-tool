@@ -176,5 +176,11 @@ async def get_multi_batch_status(redis_client: redis.Redis, request_id: str) -> 
         settings.REDIS_RESULT_EXPIRY,
         json.dumps(tracking_data)
     )
+
+    # Publish the tracking data for real-time updates
+    try:
+        await redis_client.publish('email_validation_results', json.dumps(tracking_data))
+    except Exception as e:
+        logger.error(f"Error publishing tracking data: {str(e)}")
     
     return tracking_data 
