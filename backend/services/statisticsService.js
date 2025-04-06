@@ -139,6 +139,52 @@ class StatisticsService {
             lastUpdated: singleBatch.lastUpdated
         };
     }
+
+    async getEmailList(fileId, page = 1, limit = 50, status = null) {
+        const query = { fileId };
+        if (status) {
+            query['results.status'] = status;
+        }
+
+        // Get total count for pagination
+        const totalCount = await EmailResults.aggregate([
+            { $match: { fileId } },
+            { $unwind: '$results' },
+            { $match: status ? { 'results.status': status } : {} },
+            { $count: 'total' }
+        ]);
+
+        // Get paginated results
+        const results = await EmailResults.aggregate([
+            { $match: { fileId } },
+            { $unwind: '$results' },
+            { $match: status ? { 'results.status': status } : {} },
+            { $sort: { 'results.email': 1 } },
+            { $skip: (page - 1) * limit },
+            { $limit: limit },
+            {
+                $project: {
+                    _id: 0,
+                    email: '$results.email',
+                    status: '$results.status',
+                    is_valid: '$results.is_valid',
+                    risk_level: '$results.risk_level',
+                    deliverability_score: '$results.deliverability_score',
+                    details: '$results.details'
+                }
+            }
+        ]);
+
+        return {
+            emails: results,
+            pagination: {
+                total: totalCount[0]?.total || 0,
+                page,
+                limit,
+                pages: Math.ceil((totalCount[0]?.total || 0) / limit)
+            }
+        };
+    }
 }
 
 module.exports = new StatisticsService(); 

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const emailValidationService = require('../services/emailValidationService');
 const statisticsService = require('../services/statisticsService');
+const EmailResults = require('../models/EmailResults');
 const winston = require('winston');
 
 // Configure logger
@@ -72,6 +73,30 @@ router.get('/email-validation-stats/:fileId', async (req, res) => {
         logger.error('Error fetching validation statistics:', error);
         res.status(error.message.includes('No validation records found') ? 404 : 500)
            .json({ error: error.message });
+    }
+});
+
+/**
+ * Get paginated email validation results for a file
+ * GET /api/email-validation/email-list/:fileId
+ * @param {string} fileId - Unique identifier for the file
+ * @query {number} page - Page number (default: 1)
+ * @query {number} limit - Items per page (default: 50)
+ * @query {string} status - Filter by status (optional: valid, invalid, risky, unknown)
+ * @returns {Object} Paginated list of email validation results
+ */
+router.get('/email-list/:fileId', async (req, res) => {
+    try {
+        const { fileId } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const status = req.query.status;
+
+        const results = await statisticsService.getEmailList(fileId, page, limit, status);
+        res.json(results);
+    } catch (error) {
+        logger.error('Error fetching email list:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 

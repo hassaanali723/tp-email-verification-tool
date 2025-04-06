@@ -2,6 +2,7 @@ const Redis = require('ioredis');
 const winston = require('winston');
 const EmailBatches = require('../models/EmailBatches');
 const EmailResults = require('../models/EmailResults');
+const statisticsService = require('./statisticsService');
 
 // Configure logger
 const logger = winston.createLogger({
@@ -119,6 +120,22 @@ class RedisService {
             
             // Then update EmailBatches
             await this._updateEmailBatches(data);
+
+            // Get fileId from EmailResults
+            const emailResult = await EmailResults.findOne({ batchId: data.batchId }, { fileId: 1 });
+            if (emailResult && emailResult.fileId) {
+                const fileId = emailResult.fileId;
+                
+                // Get and publish stats
+                const stats = await statisticsService.getFileStats(fileId);
+                await this.publisher.publish(`file_stats:${fileId}`, JSON.stringify(stats));
+
+                // Get and publish email list (first page)
+                const emailList = await statisticsService.getEmailList(fileId);
+                await this.publisher.publish(`file_emails:${fileId}`, JSON.stringify(emailList));
+                
+                logger.info(`Published stats and email list for fileId: ${fileId}`);
+            }
             
         } catch (error) {
             logger.error('Batch update processing failed:', { 
