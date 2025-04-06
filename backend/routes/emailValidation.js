@@ -1,138 +1,77 @@
 const express = require('express');
 const router = express.Router();
 const emailValidationService = require('../services/emailValidationService');
+const statisticsService = require('../services/statisticsService');
+const winston = require('winston');
+
+// Configure logger
+const logger = winston.createLogger({
+    level: 'info',
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+    ),
+    transports: [
+        new winston.transports.File({ filename: 'logs/routes-error.log', level: 'error' }),
+        new winston.transports.File({ filename: 'logs/routes.log' })
+    ]
+});
+
+if (process.env.NODE_ENV !== 'production') {
+    logger.add(new winston.transports.Console({
+        format: winston.format.simple()
+    }));
+}
 
 /**
  * Validate a batch of emails
- * POST /api/email-validation/batch
+ * POST /api/validate-batch
+ * @body {Object} request
+ * @body {string[]} request.emails - Array of email addresses to validate
+ * @body {string} request.fileId - Unique identifier for the file
+ * @body {Object} [request.validationFlags] - Optional validation configuration
  */
-router.post('/batch', async (req, res) => {
+router.post('/validate-batch', async (req, res) => {
     try {
-        const { 
-            emails,
-            fileId,
-            check_mx = true,
-            check_smtp = true,
-            check_disposable = true,
-            check_catch_all = true,
-            check_blacklist = true
-        } = req.body;
+        const { emails, fileId, validationFlags } = req.body;
 
-        // Validate request
-        if (!emails || !Array.isArray(emails) || emails.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide an array of emails'
-            });
+        // Input validation
+        if (!Array.isArray(emails) || emails.length === 0) {
+            return res.status(400).json({ error: 'Invalid or empty emails array' });
         }
-
-        // Validate fileId
         if (!fileId) {
-            return res.status(400).json({
-                success: false,
-                message: 'fileId is required for batch validation'
-            });
+            return res.status(400).json({ error: 'fileId is required' });
         }
 
-        // Start batch validation with all validation options
-        const result = await emailValidationService.validateEmailBatch({
+        // Forward to FastAPI service and get response
+        const response = await emailValidationService.validateEmailBatch({
             emails,
             fileId,
-            check_mx,
-            check_smtp,
-            check_disposable,
-            check_catch_all,
-            check_blacklist
+            validationFlags
         });
-        
-        res.json({
-            success: true,
-            data: result
-        });
+
+        res.json(response);
     } catch (error) {
-        console.error('Error in batch validation:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Error processing batch validation'
-        });
+        logger.error('Error in validate-batch endpoint:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
 /**
- * Get batch validation status
- * GET /api/email-validation/batch/:batchId/status
+ * Get validation statistics for a file
+ * GET /api/email-validation/email-validation-stats/:fileId
+ * @param {string} fileId - Unique identifier for the file
+ * @returns {Object} Statistics and progress information for the file
  */
-router.get('/batch/:batchId/status', async (req, res) => {
+router.get('/email-validation-stats/:fileId', async (req, res) => {
     try {
-        const { batchId } = req.params;
-
-        // Validate batchId
-        if (!batchId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Batch ID is required'
-            });
-        }
-
-        // Get batch status
-        const status = await emailValidationService.getBatchStatus(batchId);
-        
-        res.json({
-            success: true,
-            data: status
-        });
+        const { fileId } = req.params;
+        const stats = await statisticsService.getFileStats(fileId);
+        res.json(stats);
     } catch (error) {
-        console.error('Error getting batch status:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Error getting batch status'
-        });
-    }
-});
-
-/**
- * Validate a single email
- * POST /api/email-validation/single
- */
-router.post('/single', async (req, res) => {
-    try {
-        const { 
-            email,
-            check_mx = true,
-            check_smtp = true,
-            check_disposable = true,
-            check_catch_all = true,
-            check_blacklist = true
-        } = req.body;
-
-        // Validate request
-        if (!email) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide a valid email address'
-            });
-        }
-
-        // Validate single email with all validation options
-        const result = await emailValidationService.validateSingleEmail({
-            emails: [email], // FastAPI expects array even for single email
-            check_mx,
-            check_smtp,
-            check_disposable,
-            check_catch_all,
-            check_blacklist
-        });
-        
-        res.json({
-            success: true,
-            data: result
-        });
-    } catch (error) {
-        console.error('Error in single email validation:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Error validating email'
-        });
+        logger.error('Error fetching validation statistics:', error);
+        res.status(error.message.includes('No validation records found') ? 404 : 500)
+           .json({ error: error.message });
     }
 });
 
