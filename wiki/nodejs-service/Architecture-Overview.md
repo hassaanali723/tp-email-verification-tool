@@ -10,12 +10,13 @@ graph TD
     Express --> |File Upload| Storage[Storage Service]
     Express --> |Process File| FileProcessor[File Processing Service]
     FileProcessor --> |Extract Emails| Storage
-    FileProcessor --> |Batch Creation| Redis[Redis Service]
-    Redis --> |Pub/Sub| FastAPI[FastAPI Service]
-    FastAPI --> |Validation Results| Redis
+    FileProcessor --> |Send Emails| EmailValidator[Email Validation Service]
+    EmailValidator --> |Forward Emails| FastAPI[FastAPI Service]
+    FastAPI --> |Validation Results| Redis[Redis Service]
     Redis --> |Update Results| MongoDB[(MongoDB)]
     Express --> |Stats Request| Stats[Statistics Service]
     Stats --> MongoDB
+    Redis --> |Real-time Updates| Express
 ```
 
 ## Core Components
