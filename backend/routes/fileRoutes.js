@@ -3,8 +3,10 @@ const router = express.Router();
 const multer = require('multer');
 const storageService = require('../services/storageService');
 const fileProcessingService = require('../services/fileProcessingService');
+const statisticsService = require('../services/statisticsService');
 const File = require('../models/File');
 const EmailResults = require('../models/EmailResults');
+const EmailBatches = require('../models/EmailBatches');
 
 // Configure multer for memory storage
 const upload = multer({
@@ -113,7 +115,7 @@ router.get('/', async (req, res) => {
 
         const files = await File.find()
             .select('-path') // Exclude sensitive path information
-            .sort({ createdAt: -1 })
+            .sort({ uploadedAt: -1 })
             .skip(skip)
             .limit(limit);
 
@@ -124,41 +126,46 @@ router.get('/', async (req, res) => {
             const baseInfo = {
                 id: file._id,
                 filename: file.originalName,
-                uploadedAt: file.uploadedAt
+                uploadedAt: file.uploadedAt,
+                totalEmails: file.processingProgress?.emailsFound || 0
             };
 
-            // Find the latest completed validation result for this file
-            const validationResult = await EmailResults.findOne({
-                fileId: file._id,
-                status: 'completed'
-            }).sort({ updatedAt: -1 });
+            // First check if it's a multi-batch case
+            const batchRecord = await EmailBatches.findOne({ fileId: file._id });
 
-            // If no completed validation found, return as unverified
-            if (!validationResult) {
-                return {
-                    ...baseInfo,
-                    status: 'unverified',
-                    emailsReady: file.processingProgress?.emailsFound || 0
+            if (batchRecord) {
+                // Multi-batch case - use batch status
+                if (batchRecord.status === 'processing') {
+                    const stats = await statisticsService.getFileStats(file._id);
+                    return { ...baseInfo, status: 'processing', ...stats };
+                }
+                if (batchRecord.status === 'completed') {
+                    const stats = await statisticsService.getFileStats(file._id);
+                    return { ...baseInfo, status: 'verified', ...stats };
+                }
+            } else {
+                // Single batch case
+                const validationResult = await EmailResults.findOne({ fileId: file._id }).sort({ updatedAt: -1 });
+                
+                if (!validationResult) {
+                    // No validation started
+                    return { ...baseInfo, status: 'unverified', emailsReady: file.processingProgress?.emailsFound || 0 };
+                }
+
+                // For single batch, we can trust the status directly
+                const stats = await statisticsService.getFileStats(file._id);
+                return { 
+                    ...baseInfo, 
+                    status: validationResult.status === 'completed' ? 'verified' : 'processing',
+                    ...stats 
                 };
             }
 
-            // Get the statistics from the validation result
-            const stats = validationResult.statistics;
-            const total = stats.deliverable.count + 
-                         stats.undeliverable.count + 
-                         stats.risky.count + 
-                         stats.unknown.count;
-            
+            // If we get here, something went wrong
             return {
                 ...baseInfo,
-                status: 'verified',
-                validationResults: {
-                    deliverable: ((stats.deliverable.count || 0) / total * 100).toFixed(1),
-                    risky: ((stats.risky.count || 0) / total * 100).toFixed(1),
-                    undeliverable: ((stats.undeliverable.count || 0) / total * 100).toFixed(1),
-                    unknown: ((stats.unknown.count || 0) / total * 100).toFixed(1),
-                    totalEmails: total
-                }
+                status: 'error',
+                message: 'Unable to determine file status'
             };
         }));
 
