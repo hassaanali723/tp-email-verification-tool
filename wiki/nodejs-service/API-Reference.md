@@ -1,117 +1,280 @@
-# Node.js Backend API Reference
+# API Reference
 
-## Overview
-This document describes the REST APIs provided by the Node.js backend service for email validation.
+This document provides detailed information about all available API endpoints in the Email Verification Tool's Node.js backend service.
 
-## Endpoints
+## Base URL
 
-### 1. Validate Email Batch
-**Endpoint:** `POST /api/validate-batch`
+All API endpoints are prefixed with `/api`.
 
-**Description:**  
-Submits a batch of emails for validation.
+## Response Format
 
-**Request Body:**
+Most endpoints follow this general response format:
+
 ```json
 {
-    "emails": ["email1@domain.com", "email2@domain.com"],
-    "fileId": "unique-file-id",
-    "validationFlags": {
-        // Optional validation configuration
+    "success": true|false,
+    "data": {
+        // Response data specific to each endpoint
+    },
+    "message": "Optional message string"
+}
+```
+
+## Authentication
+
+Currently, the API does not require authentication. However, rate limiting and security measures are in place.
+
+## File Management Endpoints
+
+### Upload File
+- **Endpoint**: `POST /api/files/upload`
+- **Content-Type**: `multipart/form-data`
+- **Body Parameters**:
+  - `file`: File to upload (Required)
+    - Supported formats: CSV, XLSX, XLS
+    - Max size: 10MB (configurable)
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "data": {
+      "fileId": "string",
+      "totalEmails": number,
+      "message": "File uploaded and processing started"
     }
-}
-```
+  }
+  ```
+- **Error Responses**:
+  - `400`: No file uploaded or invalid file type
+  - `500`: Server error during upload
 
-**Response:**
-```json
-{
-    "batchId": "unique-batch-id",
-    "status": "processing",
-    "message": "Validation started"
-}
-```
+### Get File Status
+- **Endpoint**: `GET /api/files/:fileId/status`
+- **URL Parameters**:
+  - `fileId`: File identifier (Required)
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "data": {
+      "status": "pending|processing|completed|failed",
+      "progress": {
+        "totalRows": number,
+        "processedRows": number,
+        "emailsFound": number,
+        "percentage": number
+      },
+      "error": {
+        "message": "string",
+        "code": "string",
+        "timestamp": "date"
+      },
+      "lastUpdated": "date"
+    }
+  }
+  ```
+- **Error Responses**:
+  - `404`: File not found
+  - `500`: Server error
 
-### 2. Get Email Validation Statistics
-**Endpoint:** `GET /api/email-validation/email-validation-stats/:fileId`
-
-**Description:**  
-Retrieves validation statistics for a specific file.
-
-**Parameters:**
-- `fileId`: Unique identifier for the file
-
-**Response:**
-```json
-{
-    "totalEmails": 100,
-    "processedEmails": 75,
-    "validEmails": 60,
-    "invalidEmails": 10,
-    "riskyEmails": 5,
-    "progress": 75,
-    "status": "processing"
-}
-```
-
-### 3. Get Email List
-**Endpoint:** `GET /api/email-validation/email-list/:fileId`
-
-**Description:**  
-Retrieves a paginated list of validated emails for a specific file.
-
-**Parameters:**
-- `fileId`: Unique identifier for the file
-
-**Query Parameters:**
-- `page`: Page number (default: 1)
-- `limit`: Items per page (default: 50)
-- `status`: Filter by status (optional: valid, invalid, risky, unknown)
-
-**Response:**
-```json
-{
-    "emails": [
-        {
-            "email": "example@domain.com",
-            "status": "valid",
-            "is_valid": true,
-            "risk_level": "low",
-            "deliverability_score": 0.95,
-            "details": {
-                "general": {
-                    "domain": "domain.com",
-                    "reason": null,
-                    "validation_method": "smtp"
-                },
-                "attributes": {
-                    "free_email": false,
-                    "role_account": false,
-                    "disposable": false,
-                    "catch_all": false
-                },
-                "mail_server": {
-                    "smtp_provider": "Google",
-                    "mx_record": true,
-                    "implicit_mx": false
-                }
-            }
+### List Files
+- **Endpoint**: `GET /api/files`
+- **Query Parameters**:
+  - `page`: Page number (Default: 1)
+  - `limit`: Items per page (Default: 10)
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "data": {
+      "files": [{
+        "id": "string",
+        "filename": "string",
+        "uploadedAt": "date",
+        "status": "unverified|verified",
+        "emailsReady": number,
+        "validationResults": {
+          "deliverable": "string",
+          "risky": "string",
+          "undeliverable": "string",
+          "unknown": "string",
+          "totalEmails": number
         }
-    ],
-    "pagination": {
-        "total": 100,
-        "page": 1,
-        "limit": 50,
-        "pages": 2
+      }],
+      "pagination": {
+        "total": number,
+        "page": number,
+        "pages": number
+      }
     }
-}
-```
+  }
+  ```
+
+### Delete File
+- **Endpoint**: `DELETE /api/files/:fileId`
+- **URL Parameters**:
+  - `fileId`: File identifier (Required)
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "message": "File deleted successfully"
+  }
+  ```
+- **Error Responses**:
+  - `404`: File not found
+  - `500`: Error during deletion
+
+### Get Extracted Emails
+- **Endpoint**: `GET /api/files/:fileId/emails`
+- **URL Parameters**:
+  - `fileId`: File identifier (Required)
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "data": {
+      "emails": ["string"]
+    }
+  }
+  ```
+- **Error Responses**:
+  - `404`: File not found
+  - `400`: File processing not completed
+
+## Email Validation Endpoints
+
+### Validate Email Batch
+- **Endpoint**: `POST /api/validate-batch`
+- **Content-Type**: `application/json`
+- **Body Parameters**:
+  ```json
+  {
+    "emails": ["string"],
+    "fileId": "string",
+    "validationFlags": {
+      // Optional validation configuration
+    }
+  }
+  ```
+- **Response**: Returns validation results for the batch
+- **Error Responses**:
+  - `400`: Invalid or empty emails array
+  - `500`: Validation service error
+
+### Get Validation Statistics
+- **Endpoint**: `GET /api/email-validation/email-validation-stats/:fileId`
+- **URL Parameters**:
+  - `fileId`: File identifier (Required)
+- **Response**:
+  ```json
+  {
+    "totalEmails": number,
+    "processed": number,
+    "statistics": {
+      "deliverable": {
+        "count": number,
+        "percentage": number
+      },
+      "undeliverable": {
+        "count": number,
+        "percentage": number
+      },
+      "risky": {
+        "count": number,
+        "percentage": number
+      },
+      "unknown": {
+        "count": number,
+        "percentage": number
+      }
+    }
+  }
+  ```
+- **Error Responses**:
+  - `404`: No validation records found
+  - `500`: Server error
+
+### Get Email List
+- **Endpoint**: `GET /api/email-validation/email-list/:fileId`
+- **URL Parameters**:
+  - `fileId`: File identifier (Required)
+- **Query Parameters**:
+  - `page`: Page number (Default: 1)
+  - `limit`: Items per page (Default: 50)
+  - `status`: Filter by status (Optional: valid, invalid, risky, unknown)
+- **Response**:
+  ```json
+  {
+    "emails": [{
+      "email": "string",
+      "status": "string",
+      "is_valid": boolean,
+      "risk_level": "string",
+      "details": {
+        // Validation details specific to each email
+      }
+    }],
+    "pagination": {
+      "total": number,
+      "page": number,
+      "pages": number
+    }
+  }
+  ```
+- **Error Responses**:
+  - `500`: Server error
 
 ## Real-time Updates
-The service uses Redis pub/sub to provide real-time updates:
 
-### Channels
-1. `file_stats:{fileId}`: Publishes updated statistics
-2. `file_emails:{fileId}`: Publishes updated email list
+The service uses Redis pub/sub for real-time updates. Clients can subscribe to the following channels:
 
-### Message Format
-The messages follow the same format as their respective REST API responses.
+1. **File Progress Updates**:
+   - Channel: `file_progress:${fileId}`
+   - Message Format:
+     ```json
+     {
+       "type": "progress",
+       "data": {
+         "totalRows": number,
+         "processedRows": number,
+         "emailsFound": number,
+         "percentage": number
+       }
+     }
+     ```
+
+2. **Validation Results**:
+   - Channel: `email_validation_results:${fileId}`
+   - Message Format:
+     ```json
+     {
+       "type": "validation_result",
+       "data": {
+         "batchId": "string",
+         "results": [{
+           "email": "string",
+           "status": "string",
+           "details": {}
+         }]
+       }
+     }
+     ```
+
+## Rate Limiting
+
+- File uploads: 10 requests per minute
+- API endpoints: 100 requests per minute
+- Configurable through environment variables
+
+## Error Codes
+
+Common error codes and their meanings:
+
+- `FILE_NOT_FOUND`: Requested file does not exist
+- `INVALID_FILE_TYPE`: Unsupported file format
+- `FILE_TOO_LARGE`: File exceeds size limit
+- `PROCESSING_ERROR`: Error during file processing
+- `VALIDATION_ERROR`: Error during email validation
+- `RATE_LIMIT_EXCEEDED`: Too many requests
+- `INTERNAL_ERROR`: Internal server error
