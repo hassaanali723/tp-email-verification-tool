@@ -34,10 +34,6 @@ const fileSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    processedEmails: {
-        type: Number,
-        default: 0
-    },
     processingProgress: {
         totalRows: {
             type: Number,

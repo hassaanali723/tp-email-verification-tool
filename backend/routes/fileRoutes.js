@@ -4,7 +4,7 @@ const multer = require('multer');
 const storageService = require('../services/storageService');
 const fileProcessingService = require('../services/fileProcessingService');
 const File = require('../models/File');
-const EmailValidationResult = require('../models/EmailValidationResult');
+const EmailResults = require('../models/EmailResults');
 
 // Configure multer for memory storage
 const upload = multer({
@@ -128,7 +128,7 @@ router.get('/', async (req, res) => {
             };
 
             // Find the latest completed validation result for this file
-            const validationResult = await EmailValidationResult.findOne({
+            const validationResult = await EmailResults.findOne({
                 fileId: file._id,
                 status: 'completed'
             }).sort({ updatedAt: -1 });
