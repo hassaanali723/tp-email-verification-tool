@@ -7,10 +7,26 @@ import asyncio
 import aio_pika
 from datetime import datetime
 import redis
+import os
 
 from ..config import settings
 
+# Create logs directory if it doesn't exist
+os.makedirs('logs', exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/batch_utils.log'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Add initial log message to verify logging is working
+logger.info("Batch utils module initialized - Logging system ready")
 
 def split_into_batches(emails: List[str]) -> List[List[str]]:
     """
@@ -176,11 +192,5 @@ async def get_multi_batch_status(redis_client: redis.Redis, request_id: str) -> 
         settings.REDIS_RESULT_EXPIRY,
         json.dumps(tracking_data)
     )
-
-    # Publish the tracking data for real-time updates
-    try:
-        await redis_client.publish('email_validation_results', json.dumps(tracking_data))
-    except Exception as e:
-        logger.error(f"Error publishing tracking data: {str(e)}")
     
     return tracking_data 
