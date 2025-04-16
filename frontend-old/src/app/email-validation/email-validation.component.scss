@@ -6,6 +6,7 @@ $secondary-color: #E9BB71;   // Gold/amber - secondary brand color
 $border-color: #ddd;
 $success-color: #295C5C;     // Using primary color for success
 $danger-color: #dc2626;
+$info-color: #3b82f6;       // Blue for processing
 $border-radius: 8px;
 $spacing-unit: 20px;
 
@@ -53,6 +54,7 @@ $primary-dark: darken($primary-color, 10%);
   padding: $spacing-unit;
   background-color: white;
   transition: all 0.3s ease;
+  position: relative; // For delete button positioning
   
   &:hover {
     box-shadow: 0 4px 6px rgba($primary-color, 0.1);
@@ -79,6 +81,10 @@ $primary-dark: darken($primary-color, 10%);
   &__content {
     text-align: center;
     margin-bottom: $spacing-unit;
+    min-height: 120px; // Ensure consistent height
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
   
   &__status {
@@ -89,6 +95,7 @@ $primary-dark: darken($primary-color, 10%);
   
   &__actions {
     margin-top: $spacing-unit;
+    min-height: 40px; // Ensure consistent height
   }
 }
 
@@ -156,6 +163,16 @@ $primary-dark: darken($primary-color, 10%);
       transform: translateY(0);
     }
   }
+  
+  &-danger {
+    background-color: $danger-color;
+    color: white;
+    
+    &:hover:not(:disabled) {
+      background-color: darken($danger-color, 5%);
+      transform: translateY(-1px);
+    }
+  }
 }
 
 // Alert styles
@@ -171,37 +188,83 @@ $primary-dark: darken($primary-color, 10%);
   }
 }
 
-.list-box {
-  position: relative; // Add this to position the delete button
-
-  .delete-button {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid #ddd;
-    color: #666;
-    font-size: 18px;
-    display: none; // Hidden by default
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s;
-
-    &:hover {
-      background: #ff4444;
-      color: white;
-      border-color: #ff4444;
-    }
-  }
+// Delete button
+.delete-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #ddd;
+  color: #666;
+  font-size: 18px;
+  display: none; // Hidden by default
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
 
   &:hover {
-    .delete-button {
-      display: flex; // Show on hover
+    background: #ff4444;
+    color: white;
+    border-color: #ff4444;
+  }
+}
+
+.list-box:hover .delete-button {
+  display: flex; // Show on hover
+}
+
+// Progress status styles
+.processing-status {
+  width: 100%;
+  margin: $spacing-unit auto;
+  
+  .progress {
+    height: 10px;
+    background-color: $primary-light;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    
+    .progress-bar {
+      height: 100%;
+      background-color: $info-color;
+      border-radius: 5px;
+      transition: width 0.3s ease;
     }
+  }
+  
+  .processing-text {
+    color: $info-color;
+    font-weight: 500;
+    margin: 5px 0;
+  }
+}
+
+// Processing message
+.processing-message {
+  text-align: center;
+  color: $info-color;
+  font-style: italic;
+}
+
+// Error status
+.error-status {
+  margin: $spacing-unit auto;
+  
+  .error-icon {
+    font-size: 2rem;
+    color: $danger-color;
+    margin-bottom: 10px;
+  }
+  
+  .error-text {
+    color: $danger-color;
+    font-weight: 500;
   }
 }
 

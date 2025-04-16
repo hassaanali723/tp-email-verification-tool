@@ -1,0 +1,105 @@
+<!-- email-validation.component.html -->
+<div class="container">
+  <!-- Header with "New List" Button -->
+  <div class="header">
+    <button class="btn btn-primary" (click)="fileInput.click()">+ New List</button>
+    <input
+      #fileInput
+      type="file"
+      style="display: none;"
+      (change)="onFileSelected($event)"
+      accept=".xlsx,.xls,.csv"
+    />
+    <input
+      class="search-box"
+      type="text"
+      placeholder="Type something to search"
+    />
+  </div>
+
+  <!-- Error Message -->
+  <div *ngIf="errorMessage" class="alert alert-danger">
+    {{ errorMessage }}
+  </div>
+
+  <!-- File Boxes -->
+  <div class="lists">
+    <div *ngFor="let list of lists" class="list-box">
+      <!-- Add delete button -->
+      <button class="delete-button" (click)="deleteFile(list.fileId)">×</button>
+      <div class="list-box__header">
+        <h3 class="list-box__title">{{ list.fileName }}</h3>
+        <p class="list-box__source">📂 My Computer</p>
+      </div>
+
+      <div class="list-box__content">
+        <!-- Processing status and progress -->
+        <div *ngIf="list.status === 'processing' || list.status === 'queued'" class="processing-status">
+          <div class="progress">
+            <div class="progress-bar" [style.width.%]="list.progress || 0"></div>
+          </div>
+          <p class="processing-text">{{ list.status === 'queued' ? 'Queued...' : 'Processing: ' + (list.progress || 0) + '%' }}</p>
+        </div>
+        
+        <!-- Error status -->
+        <div *ngIf="list.status === 'failed'" class="error-status">
+          <div class="error-icon">❌</div>
+          <p class="error-text">{{ list.error || 'Validation failed' }}</p>
+        </div>
+        
+        <!-- Standard content for uploaded/verified -->
+        <div *ngIf="list.status !== 'processing' && list.status !== 'queued' && list.status !== 'failed'">
+          <div class="progress-circle">
+            <span *ngIf="list.status === 'uploaded'">{{ list.emailsReady }}</span>
+            <span *ngIf="list.status === 'verified' || list.status === 'completed'">
+              {{ list.deliverableRate || 100 | number:'1.0-0' }}%
+            </span>
+          </div>
+          <p class="list-box__status">
+            <span *ngIf="list.status === 'uploaded'">Emails Ready</span>
+            <span *ngIf="list.status === 'verified' || list.status === 'completed'">Deliverable</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Buttons -->
+      <div class="list-box__actions">
+        <!-- Upload status button -->
+        <button
+          *ngIf="list.status === 'uploaded'"
+          class="btn btn-success"
+          (click)="verifyFile(list)"
+          [disabled]="list.isProcessing"
+        >
+          {{ list.isProcessing ? 'Verifying...' : 'Verify' }}
+        </button>
+        
+        <!-- Processing/Queued status text -->
+        <div 
+          *ngIf="list.status === 'processing' || list.status === 'queued'"
+          class="processing-message"
+        >
+          {{ list.status === 'queued' ? 'Waiting in queue...' : 'Verifying emails...' }}
+        </div>
+        
+        <!-- Verified status button -->
+        <button
+          *ngIf="list.status === 'verified' || list.status === 'completed'"
+          class="btn btn-primary"
+          (click)="viewResults(list); $event.preventDefault()"
+        >
+          View Results →
+        </button>
+        
+        <!-- Failed status button -->
+        <button
+          *ngIf="list.status === 'failed'"
+          class="btn btn-danger"
+          (click)="verifyFile(list)"
+        >
+          Retry
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
