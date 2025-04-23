@@ -5,8 +5,8 @@ import { Search, Bell, User, CheckCircle } from 'lucide-react'
 export function Navbar() {
   return (
     <div className="h-16 bg-white border-b border-gray-100">
-      <div className="h-full flex items-center justify-between px-6 gap-4">
-        {/* System status indicator */}
+      <div className="h-full flex items-center justify-between px-6">
+        {/* System status indicator - left side */}
         <div className="flex items-center">
           <div className="flex items-center text-sm">
             <span className="flex h-2 w-2 relative mr-2">
@@ -17,7 +17,7 @@ export function Navbar() {
           </div>
         </div>
         
-        {/* Right section with search, notifications and profile */}
+        {/* Right side elements */}
         <div className="flex items-center space-x-4">
           {/* Search */}
           <div className="relative max-w-xs w-64">
