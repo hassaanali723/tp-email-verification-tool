@@ -36,14 +36,34 @@ export default function FilesList() {
     isLoading, 
     fetchFiles, 
     startVerification,
-    deleteFile
+    deleteFile,
+    cleanupSSE,
+    error
   } = useFileStore();
 
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
+  const [showErrorDialog, setShowErrorDialog] = useState(false);
 
   useEffect(() => {
     fetchFiles();
-  }, [fetchFiles]);
+    return () => {
+      files.forEach(file => cleanupSSE(file.id));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Show error dialog if error is set and matches expired emails
+  useEffect(() => {
+    if (error && error.toLowerCase().includes("no emails found")) {
+      setShowErrorDialog(true);
+    }
+  }, [error]);
+
+  const handleErrorDialogClose = () => {
+    setShowErrorDialog(false);
+    // Clear the error in the store
+    useFileStore.setState({ error: null });
+  };
 
   const handleDeleteClick = (fileId: string) => {
     setFileToDelete(fileId);
@@ -150,15 +170,19 @@ export default function FilesList() {
 
               {/* Action Buttons */}
               <div className="flex items-center space-x-2">
-                {file.status === 'unverified' && (
+                {(file.status === 'unverified' || file.status === 'processing') && (
                   <Button 
-                    onClick={() => startVerification(file.id)}
+                    onClick={() => {
+                      console.log('Start Verification clicked for', file.id);
+                      startVerification(file.id);
+                    }}
+                    disabled={file.status === 'processing'}
                     className="bg-[#295c51] hover:bg-[#1e453c]"
                   >
                     Start Verification
                   </Button>
                 )}
-                {(file.status === 'completed' || file.status === 'processing') && (
+                {file.status === 'completed' && (
                   <Button variant="outline">
                     View Details
                     <ChevronRight className="h-4 w-4 ml-1" />
@@ -258,6 +282,25 @@ export default function FilesList() {
               className="bg-red-600 hover:bg-red-700 text-sm font-medium text-white"
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Error Dialog for expired emails */}
+      <AlertDialog open={showErrorDialog} onOpenChange={handleErrorDialogClose}>
+        <AlertDialogContent className="font-sans">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg font-semibold text-gray-800">
+              Emails Expired
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-gray-600">
+              Emails for this file have expired. Please upload the file again to continue verification.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={handleErrorDialogClose} className="bg-[#295c51] hover:bg-[#1e453c] text-white">
+              OK
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

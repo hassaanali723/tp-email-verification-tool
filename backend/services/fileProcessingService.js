@@ -14,6 +14,14 @@ const redis = new Redis({
     keyPrefix: 'email_extractor:'
 });
 
+class EmailsExpiredError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'EmailsExpiredError';
+        this.isExpected = true;
+    }
+}
+
 class FileProcessingService {
     /**
      * Process uploaded file and extract emails
@@ -59,10 +67,13 @@ class FileProcessingService {
         try {
             const emails = await redis.lrange(`emails:${fileId}`, 0, -1);
             if (!emails || emails.length === 0) {
-                throw new Error('No emails found or emails have expired');
+                throw new EmailsExpiredError('No emails found or emails have expired');
             }
             return emails;
         } catch (error) {
+            if (error instanceof EmailsExpiredError) {
+                throw error;
+            }
             throw new Error(`Error retrieving emails: ${error.message}`);
         }
     }

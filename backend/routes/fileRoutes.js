@@ -265,7 +265,11 @@ router.get('/:fileId/emails', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Error getting extracted emails:', error);
+        if (error.isExpected || error.name === 'EmailsExpiredError') {
+            console.warn(`Emails expired or not found for fileId: ${req.params.fileId}`);
+        } else {
+            console.error('Error getting extracted emails:', error);
+        }
         res.status(500).json({
             success: false,
             message: error.message || 'Error retrieving emails'
