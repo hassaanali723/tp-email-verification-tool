@@ -79,12 +79,13 @@ class EmailValidationService {
      * @private
      */
     _calculateBatchSize(totalEmails) {
-        if (totalEmails <= 20) return totalEmails;
-        if (totalEmails <= 100) return 30;
-        if (totalEmails <= 200) return 50;
-        if (totalEmails <= 500) return 100;
-        if (totalEmails <= 1000) return 150;
-        return 200;
+        if (totalEmails <= 10) return totalEmails;
+        if (totalEmails <= 50) return 10;
+        if (totalEmails <= 100) return 20;
+        if (totalEmails <= 200) return 30;
+        if (totalEmails <= 500) return 50;
+        if (totalEmails <= 1000) return 100;
+        return 150;
     }
 
     /**
