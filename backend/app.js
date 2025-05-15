@@ -6,6 +6,7 @@ const logger = require('./utils/logger');
 const redisService = require('./services/redisService');
 const fileRoutes = require('./routes/fileRoutes');
 const emailValidationRoutes = require("./routes/emailValidation");
+const eventsRoutes = require('./routes/events');
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use(cors());
 // Routes
 app.use('/api/files', fileRoutes);
 app.use('/api/email-validation', emailValidationRoutes);
+app.use('/api', eventsRoutes.router);
 
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/email-verification';

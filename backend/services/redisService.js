@@ -3,6 +3,7 @@ const winston = require('winston');
 const EmailBatches = require('../models/EmailBatches');
 const EmailResults = require('../models/EmailResults');
 const statisticsService = require('./statisticsService');
+const { sendSseEvent } = require('../routes/events');
 
 // Configure logger
 const logger = winston.createLogger({
@@ -135,6 +136,9 @@ class RedisService {
                 await this.publisher.publish(`file_emails:${fileId}`, JSON.stringify(emailList));
                 
                 logger.info(`Published stats and email list for fileId: ${fileId}`);
+
+                // Notify SSE clients for this fileId
+                sendSseEvent(fileId, 'validationUpdate', { fileId, stats });
             }
             
         } catch (error) {

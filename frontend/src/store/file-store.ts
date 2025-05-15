@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
+import { apiFetch } from '@/lib/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 interface FileStats {
   deliverable: { count: number };
@@ -75,7 +77,29 @@ interface FileStore {
   deleteFile: (fileId: string) => Promise<void>;
 }
 
-export const useFileStore = create<FileStore>((set, get) => ({
+// Helper: Subscribe to SSE for a fileId
+function subscribeToSSE(fileId: string, onUpdate: (stats: any) => void) {
+  const eventSource = new EventSource(`${API_BASE_URL.replace(/\/$/, '')}/events/${fileId}`);
+  eventSource.addEventListener('validationUpdate', async (event: MessageEvent) => {
+    try {
+      const { fileId: updatedFileId } = JSON.parse(event.data);
+      // Fetch latest stats
+      const statsRes = await fetch(`${API_BASE_URL.replace(/\/$/, '')}/email-validation/email-validation-stats/${updatedFileId}`);
+      const stats = await statsRes.json();
+      console.log('SSE stats update received:', stats); // Debug log
+      onUpdate(stats);
+      // If completed, close SSE
+      if (stats.status === 'completed') {
+        eventSource.close();
+      }
+    } catch (err) {
+      // Optionally handle error
+    }
+  });
+  return eventSource;
+}
+
+export const useFileStore = create<FileStore & { sseConnections: Record<string, EventSource | null>; cleanupSSE: (fileId: string) => void }>((set, get) => ({
   files: [],
   isLoading: false,
   error: null,
@@ -84,11 +108,12 @@ export const useFileStore = create<FileStore>((set, get) => ({
     page: 1,
     pages: 1
   },
+  sseConnections: {},
 
   fetchFiles: async (page = 1) => {
     try {
       set({ isLoading: true, error: null });
-      const response = await fetch(`http://localhost:5000/api/files/?page=${page}`);
+      const response = await apiFetch(`/files/?page=${page}`);
       const data: FileListResponse = await response.json();
       
       if (data.success) {
@@ -111,20 +136,77 @@ export const useFileStore = create<FileStore>((set, get) => ({
   startVerification: async (fileId: string) => {
     try {
       set({ error: null });
-      const response = await fetch(`http://localhost:5000/api/verify/${fileId}`, {
-        method: 'POST'
+      // 1. Fetch emails for the file
+      const emailListRes = await apiFetch(`/files/${fileId}/emails`);
+      const emailListData = await emailListRes.json();
+      const emails = emailListData?.data?.emails || [];
+
+      if (!emails.length) throw new Error('No emails found for this file');
+
+      // 2. Call validate-batch
+      const batchRes = await apiFetch('/email-validation/validate-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails, fileId }),
       });
-      
-      if (response.ok) {
-        // Refresh the file list after starting verification
-        get().fetchFiles(get().pagination.page);
-      } else {
-        set({ error: 'Failed to start verification' });
-      }
+      if (!batchRes.ok) throw new Error('Failed to start validation batch');
+
+      // 3. Optimistically update UI to 'processing'
+      set(state => ({
+        files: state.files.map(file =>
+          file.id === fileId
+            ? {
+                ...file,
+                status: 'processing',
+                progress: file.progress || { total: file.totalEmails || 0, processed: 0, percentage: 0 },
+                stats: file.stats || {
+                  deliverable: { count: 0 },
+                  undeliverable: {
+                    count: 0,
+                    categories: {
+                      invalid_email: 0,
+                      invalid_domain: 0,
+                      rejected_email: 0,
+                      invalid_smtp: 0
+                    }
+                  },
+                  risky: {
+                    count: 0,
+                    categories: {
+                      low_quality: 0,
+                      low_deliverability: 0
+                    }
+                  },
+                  unknown: {
+                    count: 0,
+                    categories: {
+                      no_connect: 0,
+                      timeout: 0,
+                      unavailable_smtp: 0,
+                      unexpected_error: 0
+                    }
+                  }
+                }
+              }
+            : file
+        )
+      }));
+
+      // 4. Subscribe to SSE for real-time updates
+      // Clean up any previous connection
+      get().cleanupSSE(fileId);
+      const eventSource = subscribeToSSE(fileId, (stats) => {
+        get().updateFileStats(fileId, stats);
+        // Optionally update status/progress here as well
+        if (stats.status === 'completed') {
+          get().cleanupSSE(fileId);
+        }
+      });
+      set(state => ({
+        sseConnections: { ...state.sseConnections, [fileId]: eventSource }
+      }));
     } catch (error) {
-      set({ 
-        error: error instanceof Error ? error.message : 'Failed to start verification'
-      });
+      set({ error: error instanceof Error ? error.message : 'Failed to start verification' });
     }
   },
 
@@ -138,25 +220,32 @@ export const useFileStore = create<FileStore>((set, get) => ({
     }));
   },
 
-  updateFileStats: (fileId: string, stats: FileStats) => {
+  updateFileStats: (fileId: string, stats: any) => {
     set(state => ({
       files: state.files.map(file =>
         file.id === fileId
-          ? { ...file, stats }
+          ? {
+              ...file,
+              stats: stats.stats || file.stats,
+              progress: stats.progress || file.progress,
+              status: stats.status || file.status
+            }
           : file
       )
     }));
   },
 
   uploadSuccess: async () => {
-    // Reset to first page and refresh the list
-    await get().fetchFiles(1);
-    toast.success('File uploaded successfully');
+    // Wait 2 seconds before fetching the file list
+    setTimeout(async () => {
+      await get().fetchFiles(1);
+      toast.success('File uploaded successfully');
+    }, 2000);
   },
 
   deleteFile: async (fileId: string) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/files/${fileId}`, {
+      const response = await apiFetch(`/files/${fileId}`, {
         method: 'DELETE',
       });
 
@@ -169,6 +258,18 @@ export const useFileStore = create<FileStore>((set, get) => ({
       toast.success('File deleted successfully');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete file');
+    }
+  },
+
+  cleanupSSE: (fileId: string) => {
+    const conn = get().sseConnections[fileId];
+    if (conn) {
+      conn.close();
+      set(state => {
+        const newConns = { ...state.sseConnections };
+        delete newConns[fileId];
+        return { sseConnections: newConns };
+      });
     }
   }
 })); 

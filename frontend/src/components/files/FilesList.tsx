@@ -43,6 +43,7 @@ export default function FilesList() {
 
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
+  const [errorDialog, setErrorDialog] = useState<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
     fetchFiles();
@@ -61,7 +62,7 @@ export default function FilesList() {
 
   const handleErrorDialogClose = () => {
     setShowErrorDialog(false);
-    // Clear the error in the store
+    setErrorDialog(null);
     useFileStore.setState({ error: null });
   };
 
@@ -173,7 +174,14 @@ export default function FilesList() {
                 {(file.status === 'unverified' || file.status === 'processing') && (
                   <Button 
                     onClick={() => {
-                      console.log('Start Verification clicked for', file.id);
+                      if (file.totalEmails === 0) {
+                        setErrorDialog({
+                          title: "No Emails Found",
+                          message: "This file contains 0 emails. Please upload a file with valid emails."
+                        });
+                        setShowErrorDialog(true);
+                        return;
+                      }
                       startVerification(file.id);
                     }}
                     disabled={file.status === 'processing'}
@@ -214,7 +222,7 @@ export default function FilesList() {
                         <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
                         <div>
                           <div className="text-lg font-semibold text-green-700">
-                            {file.stats.deliverable.count}
+                            {file.stats?.deliverable?.count ?? 0}
                           </div>
                           <div className="text-xs text-green-600">Deliverable</div>
                         </div>
@@ -224,7 +232,7 @@ export default function FilesList() {
                         <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
                         <div>
                           <div className="text-lg font-semibold text-red-700">
-                            {file.stats.undeliverable.count}
+                            {file.stats?.undeliverable?.count ?? 0}
                           </div>
                           <div className="text-xs text-red-600">Undeliverable</div>
                         </div>
@@ -234,7 +242,7 @@ export default function FilesList() {
                         <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0" />
                         <div>
                           <div className="text-lg font-semibold text-yellow-700">
-                            {file.stats.risky.count}
+                            {file.stats?.risky?.count ?? 0}
                           </div>
                           <div className="text-xs text-yellow-600">Risky</div>
                         </div>
@@ -244,7 +252,7 @@ export default function FilesList() {
                         <Clock className="h-5 w-5 text-gray-500 flex-shrink-0" />
                         <div>
                           <div className="text-lg font-semibold text-gray-700">
-                            {file.stats.unknown.count}
+                            {file.stats?.unknown?.count ?? 0}
                           </div>
                           <div className="text-xs text-gray-600">Unknown</div>
                         </div>
@@ -287,15 +295,17 @@ export default function FilesList() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Error Dialog for expired emails */}
+      {/* Error Dialog for expired emails and 0 emails */}
       <AlertDialog open={showErrorDialog} onOpenChange={handleErrorDialogClose}>
         <AlertDialogContent className="font-sans">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-lg font-semibold text-gray-800">
-              Emails Expired
+              {errorDialog?.title || (error && error.toLowerCase().includes("expired") ? "Emails Expired" : "Error")}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-sm text-gray-600">
-              Emails for this file have expired. Please upload the file again to continue verification.
+              {errorDialog?.message || (error && error.toLowerCase().includes("no emails found")
+                ? "Emails for this file have expired. Please upload the file again to continue verification."
+                : error)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
