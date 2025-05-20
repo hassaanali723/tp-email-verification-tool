@@ -1,11 +1,6 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import ClientLayout from "./ClientLayout";
 import "./globals.css";
-import { cn } from "@/lib/utils";
-import { Sidebar } from "@/components/sidebar/Sidebar";
-import { Navbar } from '@/components/navbar/Navbar'
-
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: {
@@ -37,24 +32,11 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={cn(
-        "min-h-screen bg-background antialiased",
-        inter.className
-      )}>
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <div className="flex-1 ml-80">
-            <Navbar />
-            <main className="p-6">{children}</main>
-          </div>
-        </div>
+      <body>
+        <ClientLayout>{children}</ClientLayout>
       </body>
     </html>
   );

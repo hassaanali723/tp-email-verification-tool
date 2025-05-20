@@ -1,8 +1,38 @@
 'use client'
 
 import { Search, Bell, User, CheckCircle } from 'lucide-react'
+import { UserButton, useClerk } from '@clerk/nextjs'
+
+// Clerk appearance configuration
+const clerkAppearance = {
+  variables: {
+    colorPrimary: "#295c51",
+    colorText: "#295c51",
+    colorTextSecondary: "#4B5563",
+    colorBackground: "white",
+    colorInputBackground: "#F9FAFB",
+    colorInputText: "#295c51",
+    colorSuccess: "#295c51",
+    colorDanger: "#295c51",
+    colorWarning: "#295c51"
+  },
+  elements: {
+    card: "shadow-xl",
+    footer: "hidden",
+    headerTitle: "text-[#295c51]",
+    headerSubtitle: "text-gray-600",
+    formButtonPrimary: "bg-[#295c51] hover:bg-[#1e453d] text-white",
+    formFieldInput: "border-gray-300 focus:border-[#295c51] focus:ring-[#295c51]",
+    dividerLine: "bg-gray-300",
+    dividerText: "text-gray-500",
+    socialButtonsBlockButton: "border border-gray-300 hover:bg-gray-50",
+    profileSectionPrimaryButton: "bg-[#295c51] hover:bg-[#1e453d] text-white",
+    accordionTriggerButton: "text-[#295c51]"
+  }
+}
 
 export function Navbar() {
+
   return (
     <div className="h-16 bg-white border-b border-gray-100">
       <div className="h-full flex items-center justify-between px-6">
@@ -43,9 +73,28 @@ export function Navbar() {
           </div>
           
           {/* Profile */}
-          <button className="p-1.5 rounded-full hover:bg-gray-100">
-            <User className="h-5 w-5 text-gray-600" />
-          </button>
+          <UserButton 
+            appearance={clerkAppearance}
+            userProfileProps={{
+              appearance: {
+                variables: {
+                  colorPrimary: "#295c51",
+                  colorText: "#295c51",
+                  colorTextSecondary: "#4B5563",
+                  colorBackground: "white",
+                  colorInputBackground: "#F9FAFB",
+                  colorInputText: "#295c51",
+                  colorSuccess: "#295c51",
+                  colorDanger: "#295c51",
+                  colorWarning: "#295c51"
+                },
+                elements: {
+                  card: "shadow-xl",
+                  footer: "hidden"
+                }
+              }
+            }}
+          />
         </div>
       </div>
     </div>
