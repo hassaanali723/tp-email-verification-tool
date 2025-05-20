@@ -39,11 +39,12 @@ class EmailValidationService {
      * @param {Object} options - Validation options
      * @param {string[]} options.emails - Array of email addresses
      * @param {string} options.fileId - ID of the file being validated
+     * @param {string} options.userId - User ID
      * @param {Object} options.validationFlags - Optional validation flags
      * @returns {Promise<Object>} FastAPI response
      */
     async validateEmailBatch(options) {
-        const { emails, fileId, validationFlags = {} } = options;
+        const { emails, fileId, userId, validationFlags = {} } = options;
 
         try {
             logger.info(`Starting validation for ${emails.length} emails, fileId: ${fileId}`);
@@ -61,9 +62,9 @@ class EmailValidationService {
             const isMultiBatch = response.data.requestId !== undefined;
 
             if (isMultiBatch) {
-                await this.createMultiBatchRecord(response.data, fileId);
+                await this.createMultiBatchRecord(response.data, fileId, userId);
             } else {
-                await this.createSingleBatchRecord(response.data, fileId);
+                await this.createSingleBatchRecord(response.data, fileId, userId);
             }
 
             return response.data;
@@ -92,7 +93,7 @@ class EmailValidationService {
      * Creates initial record for multi-batch validation
      * @private
      */
-    async createMultiBatchRecord(data, fileId) {
+    async createMultiBatchRecord(data, fileId, userId) {
         try {
 
             // Calculate batch size and create batches array
@@ -116,6 +117,7 @@ class EmailValidationService {
             const mainRecord = {
                 requestId: data.requestId,
                 fileId,
+                userId,
                 batchIds: data.batchIds,
                 status: 'processing',
                 totalEmails: data.totalEmails,
@@ -133,6 +135,7 @@ class EmailValidationService {
             const batchRecords = batches.map(batch => ({
                 batchId: batch.batchId,
                 fileId,
+                userId,
                 requestId: data.requestId,
                 status: 'processing',
                 totalEmails: batch.totalEmails,
@@ -155,11 +158,12 @@ class EmailValidationService {
      * Creates initial record for single batch validation
      * @private
      */
-    async createSingleBatchRecord(data, fileId) {
+    async createSingleBatchRecord(data, fileId, userId) {
         try {
             await EmailResults.create({
                 batchId: data.batchId,
                 fileId,
+                userId,
                 status: 'processing',
                 totalEmails: data.totalEmails,
                 processedEmails: 0,

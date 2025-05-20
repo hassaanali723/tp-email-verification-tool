@@ -88,15 +88,18 @@ class StatisticsService {
 
     /**
      * Get validation statistics for a file
+     * @param {string} fileId - File ID
+     * @param {string} userId - User ID
      */
-    async getFileStats(fileId) {
+    async getFileStats(fileId, userId) {
         // Check for multi-batch validation
-        const multiBatch = await EmailBatches.findOne({ fileId });
+        const multiBatch = await EmailBatches.findOne({ fileId, userId });
         
         if (multiBatch) {
             // Get all results for each batch
             const allResults = await EmailResults.find({
-                batchId: { $in: multiBatch.batchIds }
+                batchId: { $in: multiBatch.batchIds },
+                userId
             });
 
             // Combine all results
@@ -120,7 +123,7 @@ class StatisticsService {
         }
 
         // Handle single batch
-        const singleBatch = await EmailResults.findOne({ fileId });
+        const singleBatch = await EmailResults.findOne({ fileId, userId });
         if (!singleBatch) {
             throw new Error('No validation records found for this file');
         }
@@ -140,15 +143,23 @@ class StatisticsService {
         };
     }
 
-    async getEmailList(fileId, page = 1, limit = 50, status = null) {
-        const query = { fileId };
+    /**
+     * Get paginated email validation results for a file
+     * @param {string} fileId - File ID
+     * @param {string} userId - User ID
+     * @param {number} page - Page number
+     * @param {number} limit - Items per page
+     * @param {string} status - Filter by status
+     */
+    async getEmailList(fileId, userId, page = 1, limit = 50, status = null) {
+        const query = { fileId, userId };
         if (status) {
             query['results.status'] = status;
         }
 
         // Get total count for pagination
         const totalCount = await EmailResults.aggregate([
-            { $match: { fileId } },
+            { $match: { fileId, userId } },
             { $unwind: '$results' },
             { $match: status ? { 'results.status': status } : {} },
             { $count: 'total' }
@@ -156,7 +167,7 @@ class StatisticsService {
 
         // Get paginated results
         const results = await EmailResults.aggregate([
-            { $match: { fileId } },
+            { $match: { fileId, userId } },
             { $unwind: '$results' },
             { $match: status ? { 'results.status': status } : {} },
             { $sort: { 'results.email': 1 } },

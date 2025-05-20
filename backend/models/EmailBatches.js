@@ -18,6 +18,11 @@ const batchStatusSchema = new mongoose.Schema({
 });
 
 const emailBatchesSchema = new mongoose.Schema({
+    userId: {
+        type: String,
+        required: true,
+        index: true
+    },
     requestId: {
         type: String,
         required: true,

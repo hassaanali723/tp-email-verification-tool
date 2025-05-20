@@ -26,12 +26,14 @@ class FileProcessingService {
     /**
      * Process uploaded file and extract emails
      * @param {Object} fileData - File metadata from storage service
+     * @param {string} userId - User ID
      * @returns {Promise<Object>} Processing result with extracted emails
      */
-    async processFile(fileData) {
+    async processFile(fileData, userId) {
         try {
             // Create file record in database
             const fileRecord = await File.create({
+                userId,
                 filename: fileData.filename,
                 originalName: fileData.originalName,
                 mimeType: fileData.mimeType,
@@ -46,11 +48,12 @@ class FileProcessingService {
             });
 
             // Start processing in the background
-            this._processFileInBackground(fileData, fileRecord._id);
+            this._processFileInBackground(fileData, fileRecord._id, userId);
 
             // Return immediately with the file ID
             return {
                 fileId: fileRecord._id,
+                totalEmails: 0,
                 message: 'File upload successful. Processing started.'
             };
         } catch (error) {
@@ -59,32 +62,13 @@ class FileProcessingService {
     }
 
     /**
-     * Get extracted emails for a file
-     * @param {string} fileId - File ID
-     * @returns {Promise<string[]>} Array of extracted emails
-     */
-    async getExtractedEmails(fileId) {
-        try {
-            const emails = await redis.lrange(`emails:${fileId}`, 0, -1);
-            if (!emails || emails.length === 0) {
-                throw new EmailsExpiredError('No emails found or emails have expired');
-            }
-            return emails;
-        } catch (error) {
-            if (error instanceof EmailsExpiredError) {
-                throw error;
-            }
-            throw new Error(`Error retrieving emails: ${error.message}`);
-        }
-    }
-
-    /**
      * Process file in the background
      * @private
      * @param {Object} fileData - File metadata
      * @param {string} fileId - File record ID
+     * @param {string} userId - User ID
      */
-    async _processFileInBackground(fileData, fileId) {
+    async _processFileInBackground(fileData, fileId, userId) {
         try {
             // Get total rows count first
             const totalRows = await this._getTotalRows(fileData);
@@ -96,7 +80,7 @@ class FileProcessingService {
             const { emails, processedRows } = await this._extractEmails(fileData, fileId);
 
             // Store emails in Redis with 1-hour expiration
-            const redisKey = `emails:${fileId}`;
+            const redisKey = `emails:${userId}:${fileId}`;
             const pipeline = redis.pipeline();
             
             // Store each email in a Redis list
@@ -120,7 +104,7 @@ class FileProcessingService {
             });
 
             // Delete the original file as we don't need it anymore
-            await storageService.deleteFile(fileData.filename);
+            await storageService.deleteFile(fileData.filename, userId);
 
         } catch (error) {
             console.error('Background processing error:', error);
@@ -132,6 +116,23 @@ class FileProcessingService {
                 }
             });
         }
+    }
+
+    /**
+     * Get extracted emails from Redis
+     * @param {string} fileId - File ID
+     * @param {string} userId - User ID
+     * @returns {Promise<string[]>} Array of extracted emails
+     */
+    async getExtractedEmails(fileId, userId) {
+        const redisKey = `emails:${userId}:${fileId}`;
+        const emails = await redis.lrange(redisKey, 0, -1);
+        
+        if (!emails || emails.length === 0) {
+            throw new EmailsExpiredError('Extracted emails have expired or were not found');
+        }
+        
+        return emails;
     }
 
     /**

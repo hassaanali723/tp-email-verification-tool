@@ -1,9 +1,11 @@
 const express = require('express');
 const router = express.Router();
+const { requireAuth } = require('../middleware/auth');
 const emailValidationService = require('../services/emailValidationService');
 const statisticsService = require('../services/statisticsService');
 const EmailResults = require('../models/EmailResults');
 const winston = require('winston');
+const File = require('../models/File');
 
 // Configure logger
 const logger = winston.createLogger({
@@ -24,6 +26,9 @@ if (process.env.NODE_ENV !== 'production') {
     }));
 }
 
+// Apply auth middleware to all routes
+router.use(requireAuth);
+
 /**
  * Validate a batch of emails
  * POST /api/validate-batch
@@ -35,6 +40,7 @@ if (process.env.NODE_ENV !== 'production') {
 router.post('/validate-batch', async (req, res) => {
     try {
         const { emails, fileId, validationFlags } = req.body;
+        const userId = req.auth.userId;
 
         // Input validation
         if (!Array.isArray(emails) || emails.length === 0) {
@@ -44,10 +50,17 @@ router.post('/validate-batch', async (req, res) => {
             return res.status(400).json({ error: 'fileId is required' });
         }
 
+        // Verify file ownership
+        const file = await File.findOne({ _id: fileId, userId });
+        if (!file) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+
         // Forward to FastAPI service and get response
         const response = await emailValidationService.validateEmailBatch({
             emails,
             fileId,
+            userId,
             validationFlags
         });
 
@@ -67,7 +80,15 @@ router.post('/validate-batch', async (req, res) => {
 router.get('/email-validation-stats/:fileId', async (req, res) => {
     try {
         const { fileId } = req.params;
-        const stats = await statisticsService.getFileStats(fileId);
+        const userId = req.auth.userId;
+
+        // Verify file ownership
+        const file = await File.findOne({ _id: fileId, userId });
+        if (!file) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+
+        const stats = await statisticsService.getFileStats(fileId, userId);
         res.json(stats);
     } catch (error) {
         logger.error('Error fetching validation statistics:', error);
@@ -88,11 +109,18 @@ router.get('/email-validation-stats/:fileId', async (req, res) => {
 router.get('/email-list/:fileId', async (req, res) => {
     try {
         const { fileId } = req.params;
+        const userId = req.auth.userId;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 50;
         const status = req.query.status;
 
-        const results = await statisticsService.getEmailList(fileId, page, limit, status);
+        // Verify file ownership
+        const file = await File.findOne({ _id: fileId, userId });
+        if (!file) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+
+        const results = await statisticsService.getEmailList(fileId, userId, page, limit, status);
         res.json(results);
     } catch (error) {
         logger.error('Error fetching email list:', error);

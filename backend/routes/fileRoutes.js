@@ -1,12 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const { requireAuth } = require('../middleware/auth');
 const storageService = require('../services/storageService');
 const fileProcessingService = require('../services/fileProcessingService');
 const statisticsService = require('../services/statisticsService');
 const File = require('../models/File');
 const EmailResults = require('../models/EmailResults');
 const EmailBatches = require('../models/EmailBatches');
+
+// Apply auth middleware to all routes
+router.use(requireAuth);
 
 // Configure multer for memory storage
 const upload = multer({
@@ -39,14 +43,18 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             });
         }
 
+        // Get user ID from Clerk auth
+        const userId = req.auth.userId;
+
         // Save file using storage service
         const fileData = await storageService.saveFile(
             req.file.buffer,
-            req.file.originalname
+            req.file.originalname,
+            userId  // Pass userId to storage service
         );
 
         // Process file and extract emails
-        const result = await fileProcessingService.processFile(fileData);
+        const result = await fileProcessingService.processFile(fileData, userId);
 
         res.json({
             success: true,
@@ -71,7 +79,11 @@ router.post('/upload', upload.single('file'), async (req, res) => {
  */
 router.get('/:fileId/status', async (req, res) => {
     try {
-        const file = await File.findById(req.params.fileId);
+        const userId = req.auth.userId;
+        const file = await File.findOne({ 
+            _id: req.params.fileId,
+            userId: userId
+        });
         
         if (!file) {
             return res.status(404).json({
@@ -109,17 +121,18 @@ router.get('/:fileId/status', async (req, res) => {
  */
 router.get('/', async (req, res) => {
     try {
+        const userId = req.auth.userId;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        const files = await File.find()
+        const files = await File.find({ userId: userId })
             .select('-path') // Exclude sensitive path information
             .sort({ uploadedAt: -1 })
             .skip(skip)
             .limit(limit);
 
-        const total = await File.countDocuments();
+        const total = await File.countDocuments({ userId: userId });
 
         // Transform the data to match frontend requirements
         const transformedFiles = await Promise.all(files.map(async file => {
@@ -131,21 +144,27 @@ router.get('/', async (req, res) => {
             };
 
             // First check if it's a multi-batch case
-            const batchRecord = await EmailBatches.findOne({ fileId: file._id });
+            const batchRecord = await EmailBatches.findOne({ 
+                fileId: file._id,
+                userId: userId
+            });
 
             if (batchRecord) {
                 // Multi-batch case - use batch status
                 if (batchRecord.status === 'processing') {
-                    const stats = await statisticsService.getFileStats(file._id);
+                    const stats = await statisticsService.getFileStats(file._id, userId);
                     return { ...baseInfo, status: 'processing', ...stats };
                 }
                 if (batchRecord.status === 'completed') {
-                    const stats = await statisticsService.getFileStats(file._id);
+                    const stats = await statisticsService.getFileStats(file._id, userId);
                     return { ...baseInfo, status: 'verified', ...stats };
                 }
             } else {
                 // Single batch case
-                const validationResult = await EmailResults.findOne({ fileId: file._id }).sort({ updatedAt: -1 });
+                const validationResult = await EmailResults.findOne({ 
+                    fileId: file._id,
+                    userId: userId
+                }).sort({ updatedAt: -1 });
                 
                 if (!validationResult) {
                     // No validation started
@@ -153,7 +172,7 @@ router.get('/', async (req, res) => {
                 }
 
                 // For single batch, we can trust the status directly
-                const stats = await statisticsService.getFileStats(file._id);
+                const stats = await statisticsService.getFileStats(file._id, userId);
                 return { 
                     ...baseInfo, 
                     status: validationResult.status === 'completed' ? 'verified' : 'processing',
@@ -195,7 +214,11 @@ router.get('/', async (req, res) => {
  */
 router.delete('/:fileId', async (req, res) => {
     try {
-        const file = await File.findById(req.params.fileId);
+        const userId = req.auth.userId;
+        const file = await File.findOne({ 
+            _id: req.params.fileId,
+            userId: userId
+        });
         
         if (!file) {
             return res.status(404).json({
@@ -207,14 +230,17 @@ router.delete('/:fileId', async (req, res) => {
         // Delete file from storage if it exists
         if (file.filename) {
             try {
-                await storageService.deleteFile(file.filename);
+                await storageService.deleteFile(file.filename, userId);
             } catch (error) {
-                console.warn(`Storage file not found for ${file.filename}`);
+                console.warn(`Storage file not found for ${file.filename}:`, error);
             }
         }
 
         // Delete file record from database
-        await File.findByIdAndDelete(req.params.fileId);
+        await File.findOneAndDelete({ 
+            _id: req.params.fileId,
+            userId: userId
+        });
 
         res.json({
             success: true,
@@ -236,9 +262,13 @@ router.delete('/:fileId', async (req, res) => {
 router.get('/:fileId/emails', async (req, res) => {
     try {
         const { fileId } = req.params;
+        const userId = req.auth.userId;
         
         // Check if file exists and is processed
-        const file = await File.findById(fileId);
+        const file = await File.findOne({ 
+            _id: fileId,
+            userId: userId
+        });
         if (!file) {
             return res.status(404).json({
                 success: false,
@@ -254,7 +284,7 @@ router.get('/:fileId/emails', async (req, res) => {
         }
 
         // Get emails from temporary storage
-        const emails = await fileProcessingService.getExtractedEmails(fileId);
+        const emails = await fileProcessingService.getExtractedEmails(fileId, userId);
 
         res.json({
             success: true,

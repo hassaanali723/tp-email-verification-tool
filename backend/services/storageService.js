@@ -39,12 +39,17 @@ class StorageService {
      * Save file to storage
      * @param {Buffer} fileBuffer - File data buffer
      * @param {string} originalName - Original file name
+     * @param {string} userId - User ID
      * @returns {Promise<Object>} File metadata
      */
-    async saveFile(fileBuffer, originalName) {
+    async saveFile(fileBuffer, originalName, userId) {
         try {
+            // Create user-specific directory
+            const userDir = path.join(this.uploadDir, userId);
+            await fs.mkdir(userDir, { recursive: true });
+
             const filename = this._generateUniqueFilename(originalName);
-            const filePath = path.join(this.uploadDir, filename);
+            const filePath = path.join(userDir, filename);
 
             // Save file
             await fs.writeFile(filePath, fileBuffer);
@@ -57,7 +62,8 @@ class StorageService {
                 originalName,
                 path: filePath,
                 size: stats.size,
-                mimeType: this._getMimeType(originalName)
+                mimeType: this._getMimeType(originalName),
+                userId
             };
         } catch (error) {
             throw new Error(`Error saving file: ${error.message}`);
@@ -67,12 +73,25 @@ class StorageService {
     /**
      * Delete file from storage
      * @param {string} filename - Name of file to delete
+     * @param {string} userId - User ID
      * @returns {Promise<void>}
      */
-    async deleteFile(filename) {
+    async deleteFile(filename, userId) {
         try {
-            const filePath = path.join(this.uploadDir, filename);
+            const userDir = path.join(this.uploadDir, userId);
+            const filePath = path.join(userDir, filename);
             await fs.unlink(filePath);
+            
+            // Try to remove user directory if empty
+            try {
+                const files = await fs.readdir(userDir);
+                if (files.length === 0) {
+                    await fs.rmdir(userDir);
+                }
+            } catch (error) {
+                // Ignore errors when trying to remove directory
+                console.warn(`Could not remove user directory: ${error.message}`);
+            }
         } catch (error) {
             throw new Error(`Error deleting file: ${error.message}`);
         }
@@ -81,11 +100,12 @@ class StorageService {
     /**
      * Get file from storage
      * @param {string} filename - Name of file to retrieve
+     * @param {string} userId - User ID
      * @returns {Promise<Buffer>} File data
      */
-    async getFile(filename) {
+    async getFile(filename, userId) {
         try {
-            const filePath = path.join(this.uploadDir, filename);
+            const filePath = path.join(this.uploadDir, userId, filename);
             return await fs.readFile(filePath);
         } catch (error) {
             throw new Error(`Error reading file: ${error.message}`);

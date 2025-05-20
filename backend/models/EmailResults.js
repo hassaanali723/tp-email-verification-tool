@@ -44,6 +44,11 @@ const emailDetailsSchema = new mongoose.Schema({
 }, { _id: false });
 
 const emailResultsSchema = new mongoose.Schema({
+    userId: {
+        type: String,
+        required: true,
+        index: true
+    },
     batchId: {
         type: String,
         required: true,

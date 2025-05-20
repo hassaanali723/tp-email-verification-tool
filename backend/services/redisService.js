@@ -122,17 +122,18 @@ class RedisService {
             // Then update EmailBatches
             await this._updateEmailBatches(data);
 
-            // Get fileId from EmailResults
-            const emailResult = await EmailResults.findOne({ batchId: data.batchId }, { fileId: 1 });
+            // Get fileId and userId from EmailResults
+            const emailResult = await EmailResults.findOne({ batchId: data.batchId }, { fileId: 1, userId: 1 });
             if (emailResult && emailResult.fileId) {
                 const fileId = emailResult.fileId;
+                const userId = emailResult.userId;
                 
                 // Get and publish stats
-                const stats = await statisticsService.getFileStats(fileId);
+                const stats = await statisticsService.getFileStats(fileId, userId);
                 await this.publisher.publish(`file_stats:${fileId}`, JSON.stringify(stats));
 
                 // Get and publish email list (first page)
-                const emailList = await statisticsService.getEmailList(fileId);
+                const emailList = await statisticsService.getEmailList(fileId, userId);
                 await this.publisher.publish(`file_emails:${fileId}`, JSON.stringify(emailList));
                 
                 logger.info(`Published stats and email list for fileId: ${fileId}`);
