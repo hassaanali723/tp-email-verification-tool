@@ -11,3 +11,8 @@ python-multipart==0.0.6
 aio-pika==9.3.0
 redis[hiredis]==5.0.1
 setuptools>=65.5.1
+
+# Authentication & Security Dependencies
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+cryptography==41.0.7

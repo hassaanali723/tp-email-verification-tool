@@ -1,10 +1,42 @@
 from pydantic_settings import BaseSettings
 from typing import Optional, List
+from pydantic import Field, validator
 
 class Settings(BaseSettings):
     # API Settings
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "Email Validation Service"
+    
+    # Authentication & Security Settings
+    API_KEY: str = Field(
+        ...,
+        description="Shared API key for authenticating requests from Node.js backend",
+        min_length=32
+    )
+    API_KEY_HEADER: str = Field(
+        default="X-API-Key",
+        description="HTTP header name for API key authentication"
+    )
+    USER_ID_HEADER: str = Field(
+        default="X-User-ID", 
+        description="HTTP header name for user ID context"
+    )
+    CLIENT_ID_HEADER: str = Field(
+        default="X-Client-ID",
+        description="HTTP header name for client identifier"
+    )
+    ENABLE_AUTH: bool = Field(
+        default=True,
+        description="Feature flag to enable/disable authentication (use False only in development)"
+    )
+    AUTH_BYPASS_ENDPOINTS: List[str] = Field(
+        default=["/health", "/", "/docs", "/openapi.json"],
+        description="Endpoints that bypass authentication"
+    )
+    REQUEST_TIMEOUT_SECONDS: int = Field(
+        default=300,
+        description="Maximum age of request in seconds before considering it expired"
+    )
     
     # Validation Settings
     DNS_TIMEOUT: int = 10
@@ -67,14 +99,22 @@ class Settings(BaseSettings):
     WORKER_PREFETCH_COUNT: int = 1
     MAX_RETRIES: int = 3
 
+    @validator('API_KEY')
+    def validate_api_key(cls, v: str) -> str:
+        """Validate API key strength."""
+        if len(v) < 32:
+            raise ValueError("API key must be at least 32 characters long")
+        return v
+
     class Config:
         env_file = ".env"
         # Require these environment variables to be set
         env_required = [
             "RABBITMQ_HOST",
-            "RABBITMQ_USER",
+            "RABBITMQ_USER", 
             "RABBITMQ_PASS",
-            "REDIS_HOST"
+            "REDIS_HOST",
+            "API_KEY"
         ]
 
 settings = Settings() 

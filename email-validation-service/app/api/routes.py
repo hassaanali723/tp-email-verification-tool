@@ -13,6 +13,7 @@ from ..services.validator import EmailValidator
 from ..services.dns_validator import DNSValidator
 from ..services.circuit_breaker import CircuitBreaker
 from ..utils.batch_utils import split_into_batches, create_batch_tracking, queue_batch_for_processing, get_multi_batch_status
+from ..auth import RequireAuth, AuthContext
 from typing import List, Optional, Dict, Any
 import asyncio
 import logging
@@ -62,8 +63,13 @@ async def get_circuit_breaker():
         redis_client.close()
 
 @router.post("/validate")
-async def validate_email(request: EmailValidationRequest):
+async def validate_email(
+    request: EmailValidationRequest,
+    auth: AuthContext = RequireAuth
+):
     """Validate a single email address"""
+    logger.info(f"Single email validation request from user: {auth.user_id}")
+    
     if not request.emails:
         raise HTTPException(status_code=400, detail="No emails provided")
     
@@ -80,7 +86,8 @@ async def validate_email(request: EmailValidationRequest):
 @router.post("/validate-batch", response_model=BatchValidationResponse | MultiBatchResponse)
 async def validate_batch(
     request: EmailValidationRequest,
-    redis_client: aioredis.Redis = Depends(get_redis)
+    redis_client: aioredis.Redis = Depends(get_redis),
+    auth: AuthContext = RequireAuth
 ):
     """
     Validate a batch of email addresses.
@@ -88,6 +95,9 @@ async def validate_batch(
     For larger batches, queue for async processing.
     For very large batches (>100 emails), split into multiple batches for parallel processing.
     """
+    # Log authenticated user context
+    logger.info(f"Batch validation request from user: {auth.user_id}, client: {auth.client_identifier}")
+    
     if not request.emails:
         raise HTTPException(status_code=400, detail="No emails provided")
 
@@ -230,8 +240,13 @@ async def validate_batch(
             )
 
 @router.get("/validation-status/{batch_id}", response_model=ValidationStatusResponse)
-async def get_validation_status(batch_id: str):
+async def get_validation_status(
+    batch_id: str,
+    auth: AuthContext = RequireAuth
+):
     """Get the status of a batch validation request"""
+    logger.info(f"Validation status request from user: {auth.user_id} for batch: {batch_id}")
+    
     try:
         # Connect to Redis
         redis_client = redis.from_url(
@@ -282,10 +297,15 @@ async def get_validation_status(batch_id: str):
         )
 
 @router.get("/cache/view/{cache_type}")
-async def view_cache(cache_type: str):
+async def view_cache(
+    cache_type: str,
+    auth: AuthContext = RequireAuth
+):
     """View cached results by type
     Types: full, mx, blacklist, disposable, catch_all
     """
+    logger.info(f"Cache view request from user: {auth.user_id} for type: {cache_type}")
+    
     try:
         redis_client = redis.from_url(
             f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}",
@@ -324,10 +344,15 @@ async def view_cache(cache_type: str):
         )
 
 @router.delete("/cache/clear/{cache_type}")
-async def clear_cache(cache_type: str):
+async def clear_cache(
+    cache_type: str,
+    auth: AuthContext = RequireAuth
+):
     """Clear cache by type
     Types: full, mx, blacklist, disposable, catch_all, all
     """
+    logger.info(f"Cache clear request from user: {auth.user_id} for type: {cache_type}")
+    
     try:
         redis_client = redis.from_url(
             f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}",
@@ -363,11 +388,16 @@ async def clear_cache(cache_type: str):
         )
 
 @router.get("/circuit-breaker/status")
-async def get_circuit_breaker_status(circuit_breaker: CircuitBreaker = Depends(get_circuit_breaker)):
+async def get_circuit_breaker_status(
+    circuit_breaker: CircuitBreaker = Depends(get_circuit_breaker),
+    auth: AuthContext = RequireAuth
+):
     """
     Get the current status of the circuit breaker
     Shows if the system is using SMTP validation or has fallen back to DNS-only validation
     """
+    logger.info(f"Circuit breaker status request from user: {auth.user_id}")
+    
     try:
         metrics = circuit_breaker.get_metrics()
         return {
@@ -400,11 +430,16 @@ async def reset_circuit_breaker(circuit_breaker: CircuitBreaker = Depends(get_ci
         raise HTTPException(status_code=500, detail=f"Failed to reset circuit breaker: {str(e)}")
 
 @router.post("/test-dns-validation")
-async def test_dns_validation(email: str) -> EmailValidationResult:
+async def test_dns_validation(
+    email: str,
+    auth: AuthContext = RequireAuth
+) -> EmailValidationResult:
     """
     Test endpoint for DNS validation only
     This endpoint bypasses SMTP and only uses DNS validation
     """
+    logger.info(f"DNS validation test from user: {auth.user_id} for email: {email}")
+    
     try:
         result = await dns_validator.validate(email)
         return result
@@ -418,11 +453,14 @@ async def validate_email(
     check_smtp: bool = True,
     check_disposable: bool = True,
     check_catch_all: bool = True,
-    check_blacklist: bool = True
+    check_blacklist: bool = True,
+    auth: AuthContext = RequireAuth
 ) -> EmailValidationResult:
     """
     Validate a single email address
     """
+    logger.info(f"Direct email validation request from user: {auth.user_id} for email: {email}")
+    
     try:
         result = await email_validator.validate_email(
             email=email,
@@ -439,7 +477,8 @@ async def validate_email(
 @router.get("/multi-validation-status/{request_id}", response_model=MultiStatusResponse)
 async def get_multi_validation_status(
     request_id: str,
-    redis_client: aioredis.Redis = Depends(get_redis)
+    redis_client: aioredis.Redis = Depends(get_redis),
+    auth: AuthContext = RequireAuth
 ):
     """
     Get the aggregated status of a multi-batch validation request
@@ -447,6 +486,8 @@ async def get_multi_validation_status(
     This endpoint returns the combined status of all batches in a multi-batch request,
     including overall progress and individual batch statuses.
     """
+    logger.info(f"Multi-batch status request from user: {auth.user_id} for request: {request_id}")
+    
     try:
         # Get multi-batch status
         status = await get_multi_batch_status(redis_client, request_id)
