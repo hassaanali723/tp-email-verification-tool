@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Request
 from ..models.validation import (
     EmailValidationResult, 
     EmailValidationRequest, 
@@ -14,6 +14,7 @@ from ..services.dns_validator import DNSValidator
 from ..services.circuit_breaker import CircuitBreaker
 from ..utils.batch_utils import split_into_batches, create_batch_tracking, queue_batch_for_processing, get_multi_batch_status
 from ..auth import RequireAuth, AuthContext
+from ..auth.rate_limiter import limiter, RATE_LIMITS
 from typing import List, Optional, Dict, Any
 import asyncio
 import logging
@@ -63,29 +64,33 @@ async def get_circuit_breaker():
         redis_client.close()
 
 @router.post("/validate")
+@limiter.limit(RATE_LIMITS["single_validation"])
 async def validate_email(
-    request: EmailValidationRequest,
+    request: Request,
+    validation_request: EmailValidationRequest,
     auth: AuthContext = RequireAuth
 ):
     """Validate a single email address"""
     logger.info(f"Single email validation request from user: {auth.user_id}")
     
-    if not request.emails:
+    if not validation_request.emails:
         raise HTTPException(status_code=400, detail="No emails provided")
     
     result = await validator.validate_email(
-        request.emails[0],
-        check_mx=request.check_mx,
-        check_smtp=request.check_smtp,
-        check_disposable=request.check_disposable,
-        check_catch_all=request.check_catch_all,
-        check_blacklist=request.check_blacklist
+        validation_request.emails[0],
+        check_mx=validation_request.check_mx,
+        check_smtp=validation_request.check_smtp,
+        check_disposable=validation_request.check_disposable,
+        check_catch_all=validation_request.check_catch_all,
+        check_blacklist=validation_request.check_blacklist
     )
     return result
 
 @router.post("/validate-batch", response_model=BatchValidationResponse | MultiBatchResponse)
+@limiter.limit(RATE_LIMITS["batch_validation"])
 async def validate_batch(
-    request: EmailValidationRequest,
+    request: Request,
+    validation_request: EmailValidationRequest,
     redis_client: aioredis.Redis = Depends(get_redis),
     auth: AuthContext = RequireAuth
 ):
@@ -98,24 +103,24 @@ async def validate_batch(
     # Log authenticated user context
     logger.info(f"Batch validation request from user: {auth.user_id}, client: {auth.client_identifier}")
     
-    if not request.emails:
+    if not validation_request.emails:
         raise HTTPException(status_code=400, detail="No emails provided")
 
-    total_emails = len(request.emails)
+    total_emails = len(validation_request.emails)
 
     # For small batches, process directly
     if total_emails <= settings.SMALL_BATCH_THRESHOLD:
         batch_id = str(uuid.uuid4())
         results = []
-        for email in request.emails:
+        for email in validation_request.emails:
             try:
                 result = await validator.validate_email(
                     email,
-                    check_mx=request.check_mx,
-                    check_smtp=request.check_smtp,
-                    check_disposable=request.check_disposable,
-                    check_catch_all=request.check_catch_all,
-                    check_blacklist=request.check_blacklist
+                    check_mx=validation_request.check_mx,
+                    check_smtp=validation_request.check_smtp,
+                    check_disposable=validation_request.check_disposable,
+                    check_catch_all=validation_request.check_catch_all,
+                    check_blacklist=validation_request.check_blacklist
                 )
                 results.append(result)
             except Exception as e:
@@ -131,7 +136,7 @@ async def validate_batch(
         )
 
     # For larger batches, determine if we need multi-batch processing
-    email_batches = split_into_batches(request.emails)
+    email_batches = split_into_batches(validation_request.emails)
     
     # If only one batch is needed, use the standard approach
     if len(email_batches) == 1:
@@ -151,13 +156,13 @@ async def validate_batch(
             await queue_batch_for_processing(
                 connection,
                 batch_id,
-                request.emails,
+                validation_request.emails,
                 {
-                    "check_mx": request.check_mx,
-                    "check_smtp": request.check_smtp,
-                    "check_disposable": request.check_disposable,
-                    "check_catch_all": request.check_catch_all,
-                    "check_blacklist": request.check_blacklist
+                    "check_mx": validation_request.check_mx,
+                    "check_smtp": validation_request.check_smtp,
+                    "check_disposable": validation_request.check_disposable,
+                    "check_catch_all": validation_request.check_catch_all,
+                    "check_blacklist": validation_request.check_blacklist
                 }
             )
 
@@ -204,11 +209,11 @@ async def validate_batch(
                     batch_id,
                     email_batch,
                     {
-                        "check_mx": request.check_mx,
-                        "check_smtp": request.check_smtp,
-                        "check_disposable": request.check_disposable,
-                        "check_catch_all": request.check_catch_all,
-                        "check_blacklist": request.check_blacklist
+                        "check_mx": validation_request.check_mx,
+                        "check_smtp": validation_request.check_smtp,
+                        "check_disposable": validation_request.check_disposable,
+                        "check_catch_all": validation_request.check_catch_all,
+                        "check_blacklist": validation_request.check_blacklist
                     }
                 )
             
@@ -240,7 +245,9 @@ async def validate_batch(
             )
 
 @router.get("/validation-status/{batch_id}", response_model=ValidationStatusResponse)
+@limiter.limit(RATE_LIMITS["status_check"])
 async def get_validation_status(
+    request: Request,
     batch_id: str,
     auth: AuthContext = RequireAuth
 ):
@@ -447,7 +454,9 @@ async def test_dns_validation(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/validate-email")
+@limiter.limit(RATE_LIMITS["single_validation"])
 async def validate_email(
+    request: Request,
     email: str,
     check_mx: bool = True,
     check_smtp: bool = True,
@@ -475,7 +484,9 @@ async def validate_email(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/multi-validation-status/{request_id}", response_model=MultiStatusResponse)
+@limiter.limit(RATE_LIMITS["status_check"])
 async def get_multi_validation_status(
+    request: Request,
     request_id: str,
     redis_client: aioredis.Redis = Depends(get_redis),
     auth: AuthContext = RequireAuth
