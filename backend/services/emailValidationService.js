@@ -25,11 +25,19 @@ if (process.env.NODE_ENV !== 'production') {
 class EmailValidationService {
     constructor() {
         this.apiUrl = process.env.EMAIL_VALIDATION_API_URL;
+        this.apiKey = process.env.FASTAPI_API_KEY;
+        
+        if (!this.apiKey) {
+            logger.error('FASTAPI_API_KEY environment variable is not set');
+            throw new Error('FastAPI API key is required');
+        }
+        
         this.client = axios.create({
             baseURL: this.apiUrl,
             timeout: 30000,
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-API-Key': this.apiKey
             }
         });
     }
@@ -47,9 +55,9 @@ class EmailValidationService {
         const { emails, fileId, userId, validationFlags = {} } = options;
 
         try {
-            logger.info(`Starting validation for ${emails.length} emails, fileId: ${fileId}`);
+            logger.info(`Starting validation for ${emails.length} emails, fileId: ${fileId}, userId: ${userId}`);
 
-            // Send request to FastAPI
+            // Send request to FastAPI with required headers
             const response = await this.client.post('/validate-batch', {
                 emails,
                 check_mx: validationFlags.check_mx !== false,
@@ -57,7 +65,13 @@ class EmailValidationService {
                 check_disposable: validationFlags.check_disposable !== false,
                 check_catch_all: validationFlags.check_catch_all !== false,
                 check_blacklist: validationFlags.check_blacklist !== false
+            }, {
+                headers: {
+                    'X-User-ID': userId,
+                    'X-Client-ID': 'nodejs-backend'
+                }
             });
+
             // Create appropriate records based on response type
             const isMultiBatch = response.data.requestId !== undefined;
 
