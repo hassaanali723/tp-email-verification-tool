@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { Upload, X, AlertCircle, CheckCircle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -9,7 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import FilesList from '@/components/files/FilesList'
-import { useFileStore } from '@/store/file-store'
+import { useAuthenticatedFileStore } from '@/hooks/useAuthenticatedFileStore'
+import { useAuth } from '@clerk/nextjs'
 
 interface FileStatus {
   progress: number
@@ -22,9 +23,11 @@ export default function ValidatePage() {
   const [fileStatus, setFileStatus] = useState<FileStatus | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const router = useRouter()
-  const { uploadSuccess } = useFileStore()
+  const { uploadSuccess } = useAuthenticatedFileStore()
+  const { getToken } = useAuth()
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
+
     const file = acceptedFiles[0]
     if (!file) return
 
@@ -93,7 +96,7 @@ export default function ValidatePage() {
       setFileStatus({ progress: 0, status: 'error', message: errorMessage })
       toast.error(errorMessage)
     }
-  }, [uploadSuccess])
+  }, [uploadSuccess, getToken])
 
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,

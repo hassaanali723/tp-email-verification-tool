@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ProgressCircle } from "@/components/ui/progress-circle";
 import { cn } from "@/lib/utils";
+import { useAuthenticatedFileStore } from "@/hooks/useAuthenticatedFileStore";
 import { useFileStore } from "@/store/file-store";
 import {
   AlertDialog,
@@ -39,7 +40,7 @@ export default function FilesList() {
     deleteFile,
     cleanupSSE,
     error
-  } = useFileStore();
+  } = useAuthenticatedFileStore();
 
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
   const [showErrorDialog, setShowErrorDialog] = useState(false);

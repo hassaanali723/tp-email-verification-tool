@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, authenticatedApiFetch } from '@/lib/api';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 interface FileStats {
@@ -69,28 +69,31 @@ interface FileStore {
   isLoading: boolean;
   pagination: PaginationData;
   error: string | null;
-  fetchFiles: (page?: number) => Promise<void>;
-  startVerification: (fileId: string) => Promise<void>;
+  fetchFiles: (page?: number, token?: string | null) => Promise<void>;
+  startVerification: (fileId: string, token?: string | null, getToken?: () => Promise<string | null>) => Promise<void>;
   updateFileProgress: (fileId: string, progress: FileProgress) => void;
   updateFileStats: (fileId: string, stats: FileStats) => void;
-  uploadSuccess: () => Promise<void>;
-  deleteFile: (fileId: string) => Promise<void>;
+  uploadSuccess: (token?: string | null) => Promise<void>;
+  deleteFile: (fileId: string, token?: string | null) => Promise<void>;
 }
 
-// Helper: Subscribe to SSE for a fileId
-function subscribeToSSE(fileId: string, onUpdate: (stats: any) => void) {
+// Helper: Subscribe to SSE for a fileId (keeping without auth as requested)
+function subscribeToSSE(fileId: string, onUpdate: (stats: any) => void, getToken: () => Promise<string | null>) {
   const eventSource = new EventSource(`${API_BASE_URL.replace(/\/$/, '')}/events/${fileId}`);
   eventSource.addEventListener('validationUpdate', async (event: MessageEvent) => {
     try {
       const { fileId: updatedFileId } = JSON.parse(event.data);
-      // Fetch latest stats
-      const statsRes = await fetch(`${API_BASE_URL.replace(/\/$/, '')}/email-validation/email-validation-stats/${updatedFileId}`);
-      const stats = await statsRes.json();
-      console.log('SSE stats update received:', stats); // Debug log
-      onUpdate(stats);
-      // If completed, close SSE
-      if (stats.status === 'completed') {
-        eventSource.close();
+      // Get fresh token for each stats request (Clerk auto-refreshes)
+      const token = await getToken();
+      if (token) {
+        const statsRes = await authenticatedApiFetch(`/email-validation/email-validation-stats/${updatedFileId}`, token);
+        const stats = await statsRes.json();
+        console.log('SSE stats update received:', stats); // Debug log
+        onUpdate(stats);
+        // If completed, close SSE
+        if (stats.status === 'completed') {
+          eventSource.close();
+        }
       }
     } catch (err) {
       // Optionally handle error
@@ -110,10 +113,12 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
   },
   sseConnections: {},
 
-  fetchFiles: async (page = 1) => {
+  fetchFiles: async (page = 1, token?: string | null) => {
     try {
       set({ isLoading: true, error: null });
-      const response = await apiFetch(`/files/?page=${page}`);
+      const response = token 
+        ? await authenticatedApiFetch(`/files/?page=${page}`, token)
+        : await apiFetch(`/files/?page=${page}`);
       const data: FileListResponse = await response.json();
       
       if (data.success) {
@@ -133,18 +138,22 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
     }
   },
 
-  startVerification: async (fileId: string) => {
+  startVerification: async (fileId: string, token?: string | null, getToken?: () => Promise<string | null>) => {
     try {
       set({ error: null });
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+      
       // 1. Fetch emails for the file
-      const emailListRes = await apiFetch(`/files/${fileId}/emails`);
+      const emailListRes = await authenticatedApiFetch(`/files/${fileId}/emails`, token);
       const emailListData = await emailListRes.json();
       const emails = emailListData?.data?.emails || [];
 
       if (!emails.length) throw new Error('No emails found for this file');
 
       // 2. Call validate-batch
-      const batchRes = await apiFetch('/email-validation/validate-batch', {
+      const batchRes = await authenticatedApiFetch('/email-validation/validate-batch', token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emails, fileId }),
@@ -201,7 +210,7 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
         if (stats.status === 'completed') {
           get().cleanupSSE(fileId);
         }
-      });
+      }, getToken || (async () => token));
       set(state => ({
         sseConnections: { ...state.sseConnections, [fileId]: eventSource }
       }));
@@ -235,17 +244,21 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
     }));
   },
 
-  uploadSuccess: async () => {
+  uploadSuccess: async (token?: string | null) => {
     // Wait 2 seconds before fetching the file list
     setTimeout(async () => {
-      await get().fetchFiles(1);
+      await get().fetchFiles(1, token);
       toast.success('File uploaded successfully');
     }, 2000);
   },
 
-  deleteFile: async (fileId: string) => {
+  deleteFile: async (fileId: string, token?: string | null) => {
     try {
-      const response = await apiFetch(`/files/${fileId}`, {
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+      
+      const response = await authenticatedApiFetch(`/files/${fileId}`, token, {
         method: 'DELETE',
       });
 
@@ -254,7 +267,7 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
       }
 
       // Refresh the files list after successful deletion
-      await get().fetchFiles(get().pagination.page);
+      await get().fetchFiles(get().pagination.page, token);
       toast.success('File deleted successfully');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete file');
