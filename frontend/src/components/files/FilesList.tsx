@@ -29,6 +29,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useRouter } from 'next/navigation';
 
 export default function FilesList() {
   const { 
@@ -45,6 +46,8 @@ export default function FilesList() {
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [errorDialog, setErrorDialog] = useState<{ title: string; message: string } | null>(null);
+
+  const router = useRouter();
 
   useEffect(() => {
     fetchFiles();
@@ -172,7 +175,7 @@ export default function FilesList() {
 
               {/* Action Buttons */}
               <div className="flex items-center space-x-2">
-                {(file.status === 'unverified' || file.status === 'processing') && (
+                {file.status === 'unverified' && (
                   <Button 
                     onClick={() => {
                       if (file.totalEmails === 0) {
@@ -185,15 +188,17 @@ export default function FilesList() {
                       }
                       startVerification(file.id);
                     }}
-                    disabled={file.status === 'processing'}
                     className="bg-[#295c51] hover:bg-[#1e453c]"
                   >
                     Start Verification
                   </Button>
                 )}
-                {file.status === 'completed' && (
-                  <Button variant="outline">
-                    View Details
+                {(file.status === 'processing' || file.status === 'completed') && (
+                  <Button 
+                    variant="outline"
+                    onClick={() => router.push(`/results/${file.id}`)}
+                  >
+                    {file.status === 'processing' ? 'View Progress' : 'View Details'}
                     <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>
                 )}
