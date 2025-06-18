@@ -1,13 +1,17 @@
 'use client';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useValidationResultsStore } from '@/store/validation-results-store';
 import { useAuth } from '@clerk/nextjs';
+import { Card } from '@/components/ui/card';
+import { Loader2 } from 'lucide-react';
+import EmailDetailsModal from './EmailDetailsModal';
 
 interface EmailResultsListProps {
   fileId: string;
 }
 
 const EmailResultsList: React.FC<EmailResultsListProps> = ({ fileId }) => {
+  const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const {
     emails,
     loadingEmails,
@@ -15,49 +19,213 @@ const EmailResultsList: React.FC<EmailResultsListProps> = ({ fileId }) => {
     fetchEmails,
     filter,
     pagination,
+    stats,
+    subscribeToUpdates,
+    unsubscribeFromUpdates
   } = useValidationResultsStore();
   const { getToken } = useAuth();
 
+  // First effect to fetch initial emails
   useEffect(() => {
-    let isMounted = true;
-    getToken().then(token => {
-      if (token && isMounted) fetchEmails(fileId, 1, filter, token);
-    });
-    return () => { isMounted = false; };
+    const fetchInitialEmails = async () => {
+      const token = await getToken();
+      if (token) {
+        await fetchEmails(fileId, 1, filter, token);
+      }
+    };
+
+    fetchInitialEmails();
   }, [fileId, filter, fetchEmails, getToken]);
 
+  // Second effect to handle real-time updates
+  useEffect(() => {
+    const setupRealtimeUpdates = async () => {
+      if (stats?.status === 'processing') {
+        console.log('Setting up real-time updates for email list');
+        subscribeToUpdates(fileId, getToken);
+      }
+    };
+
+    setupRealtimeUpdates();
+
+    return () => {
+      console.log('Cleaning up email list SSE connection');
+      unsubscribeFromUpdates();
+    };
+  }, [fileId, stats?.status, getToken, subscribeToUpdates, unsubscribeFromUpdates]);
+
+  const handlePageChange = async (newPage: number) => {
+    const token = await getToken();
+    if (token) {
+      await fetchEmails(fileId, newPage, filter, token);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'deliverable':
+        return 'bg-green-100 text-green-700';
+      case 'undeliverable':
+        return 'bg-red-100 text-red-700';
+      case 'risky':
+        return 'bg-yellow-100 text-yellow-700';
+      default:
+        return 'bg-gray-100 text-gray-700';
+    }
+  };
+
   if (loadingEmails) {
-    return <div className="bg-white rounded-xl shadow-sm p-4">Loading emails...</div>;
-  }
-  if (errorEmails) {
-    return <div className="bg-white rounded-xl shadow-sm p-4 text-red-600">{errorEmails}</div>;
-  }
-  if (!emails.length) {
-    return <div className="bg-white rounded-xl shadow-sm p-4 text-gray-500">No emails found.</div>;
+    return (
+      <Card className="p-4">
+        <div className="flex justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        </div>
+      </Card>
+    );
   }
 
+  if (errorEmails) {
+    return (
+      <Card className="p-4">
+        <div className="text-red-500">{errorEmails}</div>
+      </Card>
+    );
+  }
+
+  const showProcessingPlaceholder = stats?.status === 'processing' && (!emails.length || emails.some(email => email.status === 'unknown'));
+
   return (
-    <div className="bg-white rounded-xl shadow-sm p-4">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b border-gray-200">
-            <th className="text-left py-2 px-4 text-sm font-medium text-gray-500">Email</th>
-            <th className="text-left py-2 px-4 text-sm font-medium text-gray-500">Status</th>
-            <th className="text-left py-2 px-4 text-sm font-medium text-gray-500">Score</th>
-          </tr>
-        </thead>
-        <tbody>
-          {emails.map((row, idx) => (
-            <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer">
-              <td className="py-2 px-4 text-sm">{row.email}</td>
-              <td className="py-2 px-4 text-sm capitalize">{row.status}</td>
-              <td className="py-2 px-4 text-sm">{row.deliverability_score !== undefined && row.deliverability_score !== null ? row.deliverability_score : '-'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {/* Pagination controls can be added here if needed */}
-    </div>
+    <>
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Email
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Score
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {showProcessingPlaceholder ? (
+                // Processing placeholder rows
+                Array.from({ length: 3 }).map((_, index) => (
+                  <tr key={`placeholder-${index}`} className="animate-pulse">
+                    <td className="px-6 py-4">
+                      <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="h-4 bg-gray-200 rounded w-24"></div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="h-4 bg-gray-200 rounded w-12"></div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                emails.map((email) => (
+                  <tr 
+                    key={email.email}
+                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                    onClick={() => setSelectedEmail(email)}
+                  >
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {email.email}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(email.status)}`}>
+                        {email.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {email.deliverability_score}%
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        {pagination && pagination.pages > 1 && (
+          <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+            <div className="flex-1 flex justify-between sm:hidden">
+              <button
+                onClick={() => handlePageChange(pagination.page - 1)}
+                disabled={pagination.page === 1}
+                className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => handlePageChange(pagination.page + 1)}
+                disabled={pagination.page === pagination.pages}
+                className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+              >
+                Next
+              </button>
+            </div>
+            <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm text-gray-700">
+                  Showing <span className="font-medium">{((pagination.page - 1) * pagination.limit) + 1}</span> to{' '}
+                  <span className="font-medium">
+                    {Math.min(pagination.page * pagination.limit, pagination.total)}
+                  </span>{' '}
+                  of <span className="font-medium">{pagination.total}</span> results
+                </p>
+              </div>
+              <div>
+                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                  <button
+                    onClick={() => handlePageChange(pagination.page - 1)}
+                    disabled={pagination.page === 1}
+                    className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+                  >
+                    Previous
+                  </button>
+                  {/* Page numbers */}
+                  {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((page) => (
+                    <button
+                      key={page}
+                      onClick={() => handlePageChange(page)}
+                      className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
+                        page === pagination.page
+                          ? 'z-10 bg-indigo-50 border-indigo-500 text-indigo-600'
+                          : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => handlePageChange(pagination.page + 1)}
+                    disabled={pagination.page === pagination.pages}
+                    className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+                  >
+                    Next
+                  </button>
+                </nav>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Email Details Modal */}
+      <EmailDetailsModal
+        open={selectedEmail !== null}
+        onClose={() => setSelectedEmail(null)}
+        emailDetails={selectedEmail}
+      />
+    </>
   );
 };
 
