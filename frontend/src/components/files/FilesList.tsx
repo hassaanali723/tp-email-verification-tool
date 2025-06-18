@@ -30,8 +30,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@clerk/nextjs';
 
 export default function FilesList() {
+  const { getToken } = useAuth();
   const { 
     files, 
     pagination, 
@@ -49,13 +51,21 @@ export default function FilesList() {
 
   const router = useRouter();
 
+  // Initial fetch and cleanup
   useEffect(() => {
+    console.log('FilesList mounted - fetching files');
     fetchFiles();
+
+    // Cleanup SSE connections on unmount
     return () => {
-      files.forEach(file => cleanupSSE(file.id));
+      console.log('FilesList unmounting - cleaning up SSE connections');
+      files.forEach(file => {
+        if (file.status === 'processing') {
+          cleanupSSE(file.id);
+        }
+      });
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Show error dialog if error is set and matches expired emails
   useEffect(() => {
@@ -63,6 +73,15 @@ export default function FilesList() {
       setShowErrorDialog(true);
     }
   }, [error]);
+
+  // Log token for API testing
+  useEffect(() => {
+    const logToken = async () => {
+      const token = await getToken();
+      console.log('Auth Token for API Testing:', token);
+    };
+    logToken();
+  }, [getToken]);
 
   const handleErrorDialogClose = () => {
     setShowErrorDialog(false);
