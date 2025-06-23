@@ -136,25 +136,38 @@ export const useValidationResultsStore = create<ValidationResultsState & { sseCo
   fetchStats: async (fileId, token) => {
     set({ loadingStats: true, errorStats: null });
     try {
-      const response = await fetchValidationStats(fileId, token);
-      const stats = response.data || response;
+      const stats = await fetchValidationStats(fileId, token);
       set({ stats, loadingStats: false });
     } catch (e: any) {
+      console.error('Error fetching stats:', e);
       set({ errorStats: e.message || 'Failed to fetch stats', loadingStats: false });
     }
   },
 
   fetchEmails: async (fileId, page = 1, filter = '', token) => {
+    if (!token) {
+      console.error('No token provided for fetchEmails');
+      set({ errorEmails: 'Authentication required', loadingEmails: false });
+      return;
+    }
+
     set({ loadingEmails: true, errorEmails: null });
     try {
-      const res = await fetchEmailList(fileId, page, 50, filter, token!);
-      set({ emails: res.emails, pagination: res.pagination, loadingEmails: false });
+      const response = await fetchEmailList(fileId, page, 50, filter, token);
+      set({ 
+        emails: response.emails || [], 
+        pagination: response.pagination || { total: 0, page: 1, limit: 50, pages: 1 },
+        loadingEmails: false 
+      });
     } catch (e: any) {
+      console.error('Error fetching emails:', e);
       set({ errorEmails: e.message || 'Failed to fetch emails', loadingEmails: false });
     }
   },
 
-  setFilter: (filter) => set({ filter }),
+  setFilter: (filter) => {
+    set({ filter, emails: [], loadingEmails: true });
+  },
 
   subscribeToUpdates: (fileId, getTokenFn) => {
     // Cleanup any existing connection
@@ -163,21 +176,48 @@ export const useValidationResultsStore = create<ValidationResultsState & { sseCo
     // Create new SSE connection
     const eventSource = subscribeToSSE(
       fileId,
-      (data) => {
+      async (data) => {
         console.log('Updating validation data:', data);
         
-        // Update both stats and emails
-        set({ 
-          stats: data.stats,
-          emails: data.emails.emails,
-          pagination: data.emails.pagination,
-          errorStats: null,
-          errorEmails: null
-        });
-        
-        // If validation is complete, close the connection
-        if (data.stats.status === 'completed') {
-          get().unsubscribeFromUpdates();
+        try {
+          // Get fresh token for each request
+          const token = await getTokenFn();
+          if (!token) {
+            throw new Error('No authentication token available');
+          }
+
+          // Fetch fresh stats and email list with current filter
+          const [statsResponse, emailsResponse] = await Promise.all([
+            fetchValidationStats(fileId, token),
+            fetchEmailList(fileId, 1, 50, get().filter, token)
+          ]);
+
+          console.log('Fetched fresh validation stats:', statsResponse);
+          console.log('Fetched fresh email list:', emailsResponse);
+          
+          // Update both stats and emails
+          set({ 
+            stats: statsResponse,
+            emails: emailsResponse.emails || [],
+            pagination: emailsResponse.pagination || { total: 0, page: 1, limit: 50, pages: 1 },
+            errorStats: null,
+            errorEmails: null,
+            loadingStats: false,
+            loadingEmails: false
+          });
+          
+          // If validation is complete, close the connection
+          if (statsResponse.status === 'completed') {
+            get().unsubscribeFromUpdates();
+          }
+        } catch (error) {
+          console.error('Error updating validation data:', error);
+          set({ 
+            errorStats: error instanceof Error ? error.message : 'Update failed',
+            errorEmails: error instanceof Error ? error.message : 'Update failed',
+            loadingStats: false,
+            loadingEmails: false
+          });
         }
       },
       getTokenFn,
@@ -186,7 +226,9 @@ export const useValidationResultsStore = create<ValidationResultsState & { sseCo
         console.error('SSE error:', error);
         set({ 
           errorStats: error.message || 'Connection error',
-          errorEmails: error.message || 'Connection error'
+          errorEmails: error.message || 'Connection error',
+          loadingStats: false,
+          loadingEmails: false
         });
       }
     );

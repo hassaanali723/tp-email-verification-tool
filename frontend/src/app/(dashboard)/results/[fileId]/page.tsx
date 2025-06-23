@@ -6,14 +6,10 @@ import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 
 interface ResultsPageProps {
-  params: { fileId: string }
+  params: Promise<{ fileId: string }> | { fileId: string }
 }
 
-export default function ResultsPage({ params }: ResultsPageProps) {
-  const { fileId } = params;
-
-  if (!fileId) return notFound();
-
+async function ResultsPageContent({ fileId }: { fileId: string }) {
   return (
     <div className="container mx-auto py-6 space-y-6">
       <ValidationResultsOverview fileId={fileId} />
@@ -26,4 +22,13 @@ export default function ResultsPage({ params }: ResultsPageProps) {
       </Suspense>
     </div>
   );
+}
+
+export default async function ResultsPage({ params }: ResultsPageProps) {
+  const resolvedParams = await Promise.resolve(params);
+  const { fileId } = resolvedParams;
+
+  if (!fileId) return notFound();
+
+  return <ResultsPageContent fileId={fileId} />;
 } 

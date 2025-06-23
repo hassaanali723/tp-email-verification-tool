@@ -3,7 +3,6 @@ import React, { useEffect, useState } from 'react';
 import { useValidationResultsStore } from '@/store/validation-results-store';
 import { useAuth } from '@clerk/nextjs';
 import { Card } from '@/components/ui/card';
-import { Loader2 } from 'lucide-react';
 import EmailDetailsModal from './EmailDetailsModal';
 
 interface EmailResultsListProps {
@@ -25,19 +24,19 @@ const EmailResultsList: React.FC<EmailResultsListProps> = ({ fileId }) => {
   } = useValidationResultsStore();
   const { getToken } = useAuth();
 
-  // First effect to fetch initial emails
+  // Effect to fetch emails when filter changes
   useEffect(() => {
-    const fetchInitialEmails = async () => {
+    const fetchFilteredEmails = async () => {
       const token = await getToken();
       if (token) {
         await fetchEmails(fileId, 1, filter, token);
       }
     };
 
-    fetchInitialEmails();
+    fetchFilteredEmails();
   }, [fileId, filter, fetchEmails, getToken]);
 
-  // Second effect to handle real-time updates
+  // Effect to handle real-time updates
   useEffect(() => {
     const setupRealtimeUpdates = async () => {
       if (stats?.status === 'processing') {
@@ -74,15 +73,10 @@ const EmailResultsList: React.FC<EmailResultsListProps> = ({ fileId }) => {
     }
   };
 
-  if (loadingEmails) {
-    return (
-      <Card className="p-4">
-        <div className="flex justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-        </div>
-      </Card>
-    );
-  }
+  const isProcessing = stats?.status === 'processing';
+  const totalEmails = stats?.progress?.total || 0;
+  const processedEmails = stats?.progress?.processed || 0;
+  const remainingEmails = Math.max(0, totalEmails - processedEmails);
 
   if (errorEmails) {
     return (
@@ -91,8 +85,6 @@ const EmailResultsList: React.FC<EmailResultsListProps> = ({ fileId }) => {
       </Card>
     );
   }
-
-  const showProcessingPlaceholder = stats?.status === 'processing' && (!emails.length || emails.some(email => email.status === 'unknown'));
 
   return (
     <>
@@ -113,48 +105,57 @@ const EmailResultsList: React.FC<EmailResultsListProps> = ({ fileId }) => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {showProcessingPlaceholder ? (
-                // Processing placeholder rows
-                Array.from({ length: 3 }).map((_, index) => (
-                  <tr key={`placeholder-${index}`} className="animate-pulse">
-                    <td className="px-6 py-4">
-                      <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="h-4 bg-gray-200 rounded w-24"></div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="h-4 bg-gray-200 rounded w-12"></div>
-                    </td>
-                  </tr>
-                ))
+              {emails.length === 0 && !isProcessing ? (
+                <tr>
+                  <td colSpan={3} className="px-6 py-4 text-center text-gray-500">
+                    No emails found for the selected filter
+                  </td>
+                </tr>
               ) : (
-                emails.map((email) => (
-                  <tr 
-                    key={email.email}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
-                    onClick={() => setSelectedEmail(email)}
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {email.email}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(email.status)}`}>
-                        {email.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {email.deliverability_score}%
-                    </td>
-                  </tr>
-                ))
+                <>
+                  {/* Processed Emails */}
+                  {emails.map((email) => (
+                    <tr 
+                      key={email.email}
+                      className="hover:bg-gray-50 cursor-pointer transition-colors"
+                      onClick={() => setSelectedEmail(email)}
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {email.email}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(email.status)}`}>
+                          {email.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {email.deliverability_score !== undefined ? `${email.deliverability_score}%` : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                  
+                  {/* Loading Placeholders for Remaining Emails */}
+                  {isProcessing && remainingEmails > 0 && Array.from({ length: Math.min(5, remainingEmails) }).map((_, index) => (
+                    <tr key={`placeholder-${index}`} className="animate-pulse">
+                      <td className="px-6 py-4">
+                        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="h-4 bg-gray-200 rounded w-24"></div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="h-4 bg-gray-200 rounded w-12"></div>
+                      </td>
+                    </tr>
+                  ))}
+                </>
               )}
             </tbody>
           </table>
         </div>
 
         {/* Pagination */}
-        {pagination && pagination.pages > 1 && (
+        {!isProcessing && pagination && pagination.pages > 1 && (
           <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
             <div className="flex-1 flex justify-between sm:hidden">
               <button
