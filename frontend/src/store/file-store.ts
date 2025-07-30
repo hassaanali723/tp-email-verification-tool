@@ -220,7 +220,7 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
       if (!token) {
         throw new Error('Authentication required');
       }
-
+      
       // 1. Fetch emails for the file
       const emailListData = await fetchFileEmails(fileId, token);
       const emails = emailListData?.data?.emails || [];
