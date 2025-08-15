@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react';
-import { PRICING_TIERS, getTierForCredits, clampCredits } from '@/constants/pricing';
+import { PRICING_TIERS, getTierForCredits, clampCredits, getPricePerCredit } from '@/constants/pricing';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -11,15 +11,15 @@ import { createCheckoutSession } from '@/lib/payments-api';
 export default function PricingPage() {
 	const { getToken } = useAuth();
 	const [mode, setMode] = useState<'payg' | 'subscription'>('payg');
-	const [selectedCredits, setSelectedCredits] = useState<number>(PRICING_TIERS[1]?.credits ?? 5000);
-	const [customInput, setCustomInput] = useState<string>(String(PRICING_TIERS[1]?.credits ?? 5000));
+	const [selectedCredits, setSelectedCredits] = useState<number>(PRICING_TIERS[0]?.credits ?? 2000);
+	const [customInput, setCustomInput] = useState<string>(String(PRICING_TIERS[0]?.credits ?? 2000));
 	const [isLoading, setIsLoading] = useState(false);
 
 	useEffect(() => {
 		setCustomInput(String(selectedCredits));
 	}, [selectedCredits]);
 
-	const currentPricePerCredit = useMemo(() => getTierForCredits(selectedCredits).pricePerCredit, [selectedCredits]);
+	const currentPricePerCredit = useMemo(() => getPricePerCredit(selectedCredits), [selectedCredits]);
 	const discountMultiplier = mode === 'subscription' ? 0.95 : 1; // 5% discount for subscription
 	const total = useMemo(() => Number((selectedCredits * currentPricePerCredit * discountMultiplier).toFixed(2)), [selectedCredits, currentPricePerCredit, discountMultiplier]);
 
@@ -92,11 +92,11 @@ export default function PricingPage() {
 						<div className="mt-2 max-w-sm mx-auto">
 							<input
 								type="number"
-								min={PRICING_TIERS[0].credits}
+								min={100}
 								value={customInput}
 								onChange={(e) => setCustomInput(e.target.value)}
 								onBlur={handleCustomInputBlur}
-								placeholder={`${PRICING_TIERS[0].credits} minimum`}
+								placeholder={`100 minimum`}
 								className="w-full h-11 px-3 rounded-md border border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 shadow-sm focus:border-[#295c51] focus:ring-[#295c51]"
 							/>
 						</div>
