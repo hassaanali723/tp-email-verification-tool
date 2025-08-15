@@ -7,8 +7,13 @@ const redisService = require('./services/redisService');
 const fileRoutes = require('./routes/fileRoutes');
 const emailValidationRoutes = require("./routes/emailValidation");
 const eventsRoutes = require('./routes/events');
+const creditRoutes = require('./routes/credits');
+const paymentsRoutes = require('./routes/payments');
 
 const app = express();
+
+// Stripe webhook requires raw body. Register it before express.json
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), paymentsRoutes.handleStripeWebhook);
 
 // Middleware
 app.use(express.json());
@@ -19,6 +24,8 @@ app.use(cors());
 // Routes
 app.use('/api/files', fileRoutes);
 app.use('/api/email-validation', emailValidationRoutes);
+app.use('/api/credits', creditRoutes);
+app.use('/api/payments', paymentsRoutes.router);
 app.use('/api', eventsRoutes.router);
 
 // MongoDB Connection

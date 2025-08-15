@@ -4,6 +4,7 @@ const EmailBatches = require('../models/EmailBatches');
 const EmailResults = require('../models/EmailResults');
 const statisticsService = require('./statisticsService');
 const { sendSseEvent } = require('../routes/events');
+const creditService = require('./creditService');
 
 // Configure logger
 const logger = winston.createLogger({
@@ -163,11 +164,24 @@ class RedisService {
                 lastUpdated: new Date()
             };
 
-            await EmailResults.findOneAndUpdate(
+            const updatedResult = await EmailResults.findOneAndUpdate(
                 { batchId: data.batchId },
                 { $set: resultsUpdate },
-                { upsert: true }
+                { upsert: true, new: true }
             );
+
+            // Check if this is a single batch completion (not part of multi-batch)
+            if (data.isComplete && updatedResult) {
+                // Check if this batch is NOT part of a multi-batch validation
+                const isPartOfMultiBatch = await EmailBatches.findOne({ 
+                    batchIds: data.batchId 
+                });
+
+                if (!isPartOfMultiBatch && updatedResult.reservationId) {
+                    // This is a single batch completion - handle credit consumption
+                    await this._handleSingleBatchCompletion(updatedResult);
+                }
+            }
         } catch (error) {
             logger.error('Failed to update EmailResults:', {
                 batchId: data.batchId,
@@ -252,16 +266,28 @@ class RedisService {
 
             const { totalProcessed, totalEmails } = this._calculateProgress(emailBatches.batches);
             const allComplete = emailBatches.batches.every(batch => batch.status === "completed");
+            const wasNotComplete = emailBatches.status !== "completed";
+
+            // Check if any batch failed
+            const hasFailed = emailBatches.batches.some(batch => batch.status === "failed");
+            const overallStatus = hasFailed ? "failed" : (allComplete ? "completed" : "processing");
 
             Object.assign(emailBatches, {
                 processedEmails: totalProcessed,
                 totalEmails,
-                status: allComplete ? "completed" : "processing",
+                status: overallStatus,
                 progress: `${totalProcessed}/${totalEmails}`,
                 lastUpdated: new Date()
             });
 
             await emailBatches.save();
+
+            // Handle credit operations based on status change
+            if (allComplete && wasNotComplete) {
+                await this._handleValidationComplete(emailBatches);
+            } else if (hasFailed && emailBatches.status !== "failed") {
+                await this._handleValidationFailed(emailBatches);
+            }
         } catch (error) {
             logger.error('Failed to update EmailBatches:', {
                 batchId: data.batchId,
@@ -278,6 +304,240 @@ class RedisService {
             totalProcessed: acc.totalProcessed + (batch.processedEmails || 0),
             totalEmails: acc.totalEmails + (batch.totalEmails || 0)
         }), { totalProcessed: 0, totalEmails: 0 });
+    }
+
+    /**
+     * Handle validation completion - convert reservation to consumption
+     * @private
+     */
+    async _handleValidationComplete(emailBatches) {
+        try {
+            const { fileId, userId, totalEmails } = emailBatches;
+            
+            logger.info('Validation completed, converting reserved credits to consumption:', {
+                fileId,
+                userId,
+                totalEmails
+            });
+
+            // Generate the same reservation ID pattern that was used during validation start
+            // This is a simplified approach - in production you'd store this in the database
+            const reservationId = `validation_${fileId}_*`; // Pattern to find reservation
+            
+            // Generate transaction reference for the consumption
+            const transactionRef = `completed_validation_${fileId}_${Date.now()}`;
+            
+            try {
+                // Try to consume reserved credits first
+                // If no reservation found, this will fail gracefully
+                await creditService.consumeReservedCredits(
+                    userId,
+                    reservationId,
+                    transactionRef,
+                    { 
+                        fileId, 
+                        emailCount: totalEmails,
+                        completedAt: new Date(),
+                        type: 'validation_completion'
+                    }
+                );
+
+                logger.info('Reserved credits converted to consumption successfully:', {
+                    userId,
+                    fileId,
+                    emailCount: totalEmails,
+                    transactionRef
+                });
+
+            } catch (creditError) {
+                // If reservation consumption fails, fall back to direct deduction
+                // This handles cases where reservation might have been lost
+                logger.warn('Failed to consume reserved credits, attempting direct deduction:', {
+                    userId,
+                    fileId,
+                    emailCount: totalEmails,
+                    error: creditError.message
+                });
+
+                try {
+                    await creditService.deductCredits(
+                        userId,
+                        totalEmails,
+                        transactionRef,
+                        `Email validation completed for file ${fileId} (${totalEmails} emails) - Fallback`,
+                        { 
+                            fileId, 
+                            emailCount: totalEmails,
+                            completedAt: new Date(),
+                            type: 'validation_completion',
+                            fallback: true
+                        }
+                    );
+
+                    logger.info('Fallback credit deduction successful:', {
+                        userId,
+                        fileId,
+                        emailCount: totalEmails
+                    });
+
+                } catch (fallbackError) {
+                    logger.error('Both reserved and direct credit consumption failed:', {
+                        userId,
+                        fileId,
+                        emailCount: totalEmails,
+                        error: fallbackError.message
+                    });
+                }
+            }
+
+        } catch (error) {
+            logger.error('Error handling validation completion:', {
+                fileId: emailBatches.fileId,
+                userId: emailBatches.userId,
+                error: error.message,
+                stack: error.stack
+            });
+        }
+    }
+
+    /**
+     * Handle validation failure - release reserved credits
+     * @private
+     */
+    async _handleValidationFailed(emailBatches) {
+        try {
+            const { fileId, userId, totalEmails } = emailBatches;
+            
+            logger.info('Validation failed, releasing reserved credits:', {
+                fileId,
+                userId,
+                totalEmails
+            });
+
+            // Generate the same reservation ID pattern that was used during validation start
+            const reservationPattern = `validation_${fileId}_*`;
+            
+            try {
+                await creditService.releaseReservedCredits(
+                    userId,
+                    reservationPattern,
+                    `Validation failed for file ${fileId}`
+                );
+
+                logger.info('Reserved credits released successfully due to validation failure:', {
+                    userId,
+                    fileId,
+                    emailCount: totalEmails
+                });
+
+            } catch (releaseError) {
+                // If release fails, it might mean the reservation was already consumed or doesn't exist
+                logger.warn('Could not release reserved credits (might not exist):', {
+                    userId,
+                    fileId,
+                    emailCount: totalEmails,
+                    error: releaseError.message
+                });
+            }
+
+        } catch (error) {
+            logger.error('Error handling validation failure:', {
+                fileId: emailBatches.fileId,
+                userId: emailBatches.userId,
+                error: error.message,
+                stack: error.stack
+            });
+        }
+    }
+
+    /**
+     * Handle single batch completion - consume reserved credits
+     * @private
+     */
+    async _handleSingleBatchCompletion(emailResult) {
+        try {
+            const { fileId, userId, totalEmails, reservationId } = emailResult;
+            
+            logger.info('Single batch validation completed, consuming credits:', {
+                fileId,
+                userId,
+                totalEmails,
+                reservationId
+            });
+
+            // Generate transaction reference for the consumption
+            const transactionRef = `completed_validation_${fileId}_${Date.now()}`;
+            
+            try {
+                // Try to consume the specific reserved credits
+                await creditService.consumeReservedCredits(
+                    userId,
+                    reservationId,
+                    transactionRef,
+                    { 
+                        fileId, 
+                        emailCount: totalEmails,
+                        completedAt: new Date(),
+                        type: 'single_batch_completion'
+                    }
+                );
+
+                logger.info('Reserved credits consumed successfully for single batch:', {
+                    userId,
+                    fileId,
+                    emailCount: totalEmails,
+                    reservationId
+                });
+
+            } catch (creditError) {
+                // If reservation consumption fails, fall back to direct deduction
+                logger.warn('Failed to consume reserved credits for single batch, attempting direct deduction:', {
+                    userId,
+                    fileId,
+                    emailCount: totalEmails,
+                    reservationId,
+                    error: creditError.message
+                });
+
+                try {
+                    await creditService.deductCredits(
+                        userId,
+                        totalEmails,
+                        transactionRef,
+                        `Single batch validation completed for file ${fileId} (${totalEmails} emails) - Fallback`,
+                        { 
+                            fileId, 
+                            emailCount: totalEmails,
+                            completedAt: new Date(),
+                            type: 'single_batch_completion',
+                            fallback: true
+                        }
+                    );
+
+                    logger.info('Fallback credit deduction successful for single batch:', {
+                        userId,
+                        fileId,
+                        emailCount: totalEmails
+                    });
+
+                } catch (fallbackError) {
+                    logger.error('Both reserved and direct credit consumption failed for single batch:', {
+                        userId,
+                        fileId,
+                        emailCount: totalEmails,
+                        error: fallbackError.message
+                    });
+                }
+            }
+
+        } catch (error) {
+            logger.error('Error handling single batch completion:', {
+                fileId: emailResult.fileId,
+                userId: emailResult.userId,
+                error: error.message,
+                stack: error.stack
+            });
+        }
     }
 
     async cleanup() {

@@ -52,7 +52,7 @@ class EmailValidationService {
      * @returns {Promise<Object>} FastAPI response
      */
     async validateEmailBatch(options) {
-        const { emails, fileId, userId, validationFlags = {} } = options;
+        const { emails, fileId, userId, validationFlags = {}, reservationId } = options;
 
         try {
             logger.info(`Starting validation for ${emails.length} emails, fileId: ${fileId}, userId: ${userId}`);
@@ -76,9 +76,9 @@ class EmailValidationService {
             const isMultiBatch = response.data.requestId !== undefined;
 
             if (isMultiBatch) {
-                await this.createMultiBatchRecord(response.data, fileId, userId);
+                await this.createMultiBatchRecord(response.data, fileId, userId, reservationId);
             } else {
-                await this.createSingleBatchRecord(response.data, fileId, userId);
+                await this.createSingleBatchRecord(response.data, fileId, userId, reservationId);
             }
 
             return response.data;
@@ -107,7 +107,7 @@ class EmailValidationService {
      * Creates initial record for multi-batch validation
      * @private
      */
-    async createMultiBatchRecord(data, fileId, userId) {
+    async createMultiBatchRecord(data, fileId, userId, reservationId) {
         try {
 
             // Calculate batch size and create batches array
@@ -139,6 +139,7 @@ class EmailValidationService {
                 progress: '0%',
                 isMultiBatch: true,
                 batches,
+                reservationId, // Store for credit consumption later
                 lastUpdated: new Date()
             };
 
@@ -172,7 +173,7 @@ class EmailValidationService {
      * Creates initial record for single batch validation
      * @private
      */
-    async createSingleBatchRecord(data, fileId, userId) {
+    async createSingleBatchRecord(data, fileId, userId, reservationId) {
         try {
             await EmailResults.create({
                 batchId: data.batchId,
@@ -182,6 +183,7 @@ class EmailValidationService {
                 totalEmails: data.totalEmails,
                 processedEmails: 0,
                 results: [],
+                reservationId, // Store for credit consumption later
                 lastUpdated: new Date()
             });
 
