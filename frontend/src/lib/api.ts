@@ -1,5 +1,3 @@
-import { useAuth } from '@clerk/nextjs';
-
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 export const apiFetch = (endpoint: string, options?: RequestInit) => {
@@ -25,3 +23,11 @@ export const authenticatedApiFetch = async (endpoint: string, token: string | nu
     },
   });
 };
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
