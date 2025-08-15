@@ -196,6 +196,44 @@ class StatisticsService {
             }
         };
     }
+
+    /**
+     * Get aggregate stats for a user across all validations
+     * @param {string} userId
+     * @returns {Promise<{ totalProcessed: number, deliverable: number, undeliverable: number, risky: number, unknown: number }>}
+     */
+    async getUserAggregateStats(userId) {
+        // Aggregate across all EmailResults for this user by unwinding the results array
+        const byStatus = await EmailResults.aggregate([
+            { $match: { userId } },
+            { $unwind: '$results' },
+            { $group: { _id: '$results.status', count: { $sum: 1 } } }
+        ]);
+
+        const counts = {
+            deliverable: 0,
+            undeliverable: 0,
+            risky: 0,
+            unknown: 0,
+        };
+
+        let totalProcessed = 0;
+        for (const row of byStatus) {
+            const status = row._id || 'unknown';
+            const value = row.count || 0;
+            totalProcessed += value;
+            if (counts.hasOwnProperty(status)) {
+                counts[status] = value;
+            } else {
+                counts.unknown += value;
+            }
+        }
+
+        return {
+            totalProcessed,
+            ...counts,
+        };
+    }
 }
 
 module.exports = new StatisticsService(); 

@@ -1,11 +1,15 @@
 import { apiFetch, authenticatedApiFetch } from '@/lib/api';
 
-export async function fetchFiles(page: number, token?: string | null) {
-  const endpoint = `/files/?page=${page}`;
+export async function fetchFiles(page: number, token?: string | null, limit?: number) {
+  const endpoint = `/files/?page=${page}${limit ? `&limit=${encodeURIComponent(String(limit))}` : ''}`;
   const response = token
     ? await authenticatedApiFetch(endpoint, token)
     : await apiFetch(endpoint);
   return response.json();
+}
+
+export async function fetchFilesWithLimit(limit: number, token?: string | null) {
+  return fetchFiles(1, token, limit);
 }
 
 export async function fetchFileEmails(fileId: string, token: string) {
@@ -37,3 +41,9 @@ export async function fetchValidationStats(fileId: string, token: string) {
   const response = await authenticatedApiFetch(endpoint, token);
   return response.json();
 } 
+
+export async function fetchUserAggregateStats(token: string) {
+  const endpoint = `/email-validation/user-stats`;
+  const response = await authenticatedApiFetch(endpoint, token);
+  return response.json();
+}

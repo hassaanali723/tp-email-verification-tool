@@ -151,6 +151,24 @@ router.get('/email-validation-stats/:fileId', async (req, res) => {
 });
 
 /**
+ * Get aggregate user dashboard stats
+ * GET /api/email-validation/user-stats
+ */
+router.get('/user-stats', async (req, res) => {
+    try {
+        const userId = req.auth.userId;
+        const agg = await statisticsService.getUserAggregateStats(userId);
+        res.json({
+            success: true,
+            data: agg,
+        });
+    } catch (error) {
+        logger.error('Error fetching user aggregate stats:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
  * Get paginated email validation results for a file
  * GET /api/email-validation/email-list/:fileId
  * @param {string} fileId - Unique identifier for the file
