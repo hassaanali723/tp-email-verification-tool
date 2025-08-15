@@ -67,9 +67,31 @@ export default function FilesList() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Show error dialog if error is set and matches expired emails
+  // Show error dialog for specific errors (no emails, insufficient credits, expired)
   useEffect(() => {
-    if (error && error.toLowerCase().includes("no emails found")) {
+    if (!error) return;
+    const lower = error.toLowerCase();
+    if (lower.includes("no emails found")) {
+      setErrorDialog({
+        title: "No Emails Found",
+        message: "This file contains 0 emails. Please upload a file with valid emails."
+      });
+      setShowErrorDialog(true);
+      return;
+    }
+    if (lower.includes("insufficient credits")) {
+      setErrorDialog({
+        title: "Insufficient Credits",
+        message: error
+      });
+      setShowErrorDialog(true);
+      return;
+    }
+    if (lower.includes("expired")) {
+      setErrorDialog({
+        title: "Emails Expired",
+        message: error
+      });
       setShowErrorDialog(true);
     }
   }, [error]);
@@ -334,7 +356,18 @@ export default function FilesList() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction onClick={handleErrorDialogClose} className="bg-[#295c51] hover:bg-[#1e453c] text-white">
+            {errorDialog?.title === 'Insufficient Credits' && (
+              <AlertDialogAction
+                onClick={() => {
+                  handleErrorDialogClose();
+                  router.push('/pricing');
+                }}
+                className="bg-[#295c51] hover:bg-[#1e453c] text-white"
+              >
+                Buy Credits
+              </AlertDialogAction>
+            )}
+            <AlertDialogAction onClick={handleErrorDialogClose} className="bg-gray-800 hover:bg-gray-900 text-white">
               OK
             </AlertDialogAction>
           </AlertDialogFooter>

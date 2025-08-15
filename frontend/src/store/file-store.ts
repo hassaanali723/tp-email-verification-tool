@@ -229,10 +229,35 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
       const emails = emailListData?.data?.emails || [];
       if (!emails.length) throw new Error('No emails found for this file');
 
-      // 2. Call validate-batch
+      // 2. Check credits before starting validation
+      try {
+        console.log('Checking credit sufficiency before validation...');
+        const checkRes = await authenticatedApiFetch('/credits/check-sufficient', token, {
+          method: 'POST',
+          body: JSON.stringify({ requiredCredits: emails.length })
+        });
+        if (!checkRes.ok) {
+          const errText = await checkRes.text();
+          throw new Error(errText || `Failed to check credits (${checkRes.status})`);
+        }
+        const checkJson = await checkRes.json();
+        if (!checkJson?.data?.hasSufficientCredits) {
+          const shortfall = checkJson?.data?.shortfall ?? emails.length;
+          const message = `Insufficient credits. You need ${shortfall} more to verify this file.`;
+          try { toast.error(message, { duration: 5000 }); } catch {}
+          set({ error: message });
+          return; // Do not start validation
+        }
+      } catch (err) {
+        console.error('Credit check failed:', err);
+        toast.error(err instanceof Error ? err.message : 'Unable to verify credits');
+        return;
+      }
+
+      // 3. Call validate-batch
       await startValidationBatch(emails, fileId, token);
 
-      // 3. Optimistically update UI to 'processing'
+      // 4. Optimistically update UI to 'processing'
       set(state => ({
         files: state.files.map(file =>
           file.id === fileId
@@ -273,7 +298,7 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
         )
       }));
 
-      // 4. Subscribe to SSE for real-time updates
+      // 5. Subscribe to SSE for real-time updates
       get().cleanupSSE(fileId);
       const eventSource = subscribeToSSE(
         fileId,
@@ -284,7 +309,10 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
         sseConnections: { ...state.sseConnections, [fileId]: eventSource }
       }));
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : 'Failed to start verification' });
+      const message = error instanceof Error ? error.message : 'Failed to start verification';
+      console.error('Start verification error:', message);
+      toast.error(message);
+      set({ error: message });
     }
   },
 

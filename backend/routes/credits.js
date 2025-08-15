@@ -23,6 +23,23 @@ router.get('/balance', async (req, res) => {
     const userId = req.auth.userId;
     
     const balance = await creditService.getBalance(userId);
+    // Auto-initialize trial credits for brand new users (no account yet)
+    if ((balance.balance === 0) && (balance.transactionCount === 0)) {
+      try {
+        // Use the existing initialize endpoint logic
+        await creditService.initializeNewUser(userId);
+        // Re-fetch balance after initialization
+        const updatedBalance = await creditService.getBalance(userId);
+        return res.json({
+          success: true,
+          data: updatedBalance,
+          message: 'Credit balance retrieved successfully'
+        });
+      } catch (e) {
+        // If already initialized by a race, ignore and return original balance
+        logger.info('User already initialized or initialization failed:', { userId, error: e.message });
+      }
+    }
     
     res.json({
       success: true,
