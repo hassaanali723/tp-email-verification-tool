@@ -8,6 +8,7 @@ import {
   fetchValidationStats
 } from '@/lib/file-api';
 import { authenticatedApiFetch } from '@/lib/api';
+import { emitCreditBalanceRefresh } from '@/lib/events';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
@@ -161,6 +162,8 @@ async function handleValidationUpdate(
     if (statsData.status === 'completed') {
       console.log('Validation completed, closing SSE connection');
       eventSource.close();
+      // Trigger a navbar refresh of credit balance after consumption
+      try { emitCreditBalanceRefresh(); } catch {}
     }
   } catch (err) {
     console.error('Error fetching validation stats:', err);

@@ -5,6 +5,7 @@ import { UserButton } from '@clerk/nextjs'
 import { useEffect, useState } from 'react'
 import { useAuth } from '@clerk/nextjs'
 import { fetchCreditBalance, fetchRecentCreditTransactions, type CreditTransaction } from '@/lib/payments-api'
+import { CREDIT_BALANCE_REFRESH } from '@/lib/events'
 
 // Clerk appearance configuration
 const clerkAppearance = {
@@ -56,6 +57,9 @@ export function Navbar() {
       }
     };
     load();
+    const handler = () => load();
+    window.addEventListener(CREDIT_BALANCE_REFRESH, handler);
+    return () => window.removeEventListener(CREDIT_BALANCE_REFRESH, handler);
   }, [getToken]);
 
   return (
