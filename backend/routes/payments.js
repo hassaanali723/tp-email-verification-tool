@@ -34,12 +34,13 @@ function getUnitAmountCents(credits, mode) {
 }
 
 const DEFAULT_UNIT_CENTS = Number(process.env.PRICE_PER_CREDIT_CENTS || 1); // fallback 1 cent
+const PRICE_PER_CREDIT_CENTS = PRICING_TIERS_CENTS[0]?.unitCents || DEFAULT_UNIT_CENTS;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 // Standard router for JSON endpoints
 const router = express.Router();
 
-// Create a Checkout Session for purchasing credits
+// Create a Checkout Session for purchasing credits or subscriptions
 router.post('/create-checkout-session', requireAuth, async (req, res) => {
   try {
     const userId = req.auth.userId;
@@ -53,18 +54,25 @@ router.post('/create-checkout-session', requireAuth, async (req, res) => {
     const unitAmount = getUnitAmountCents(creditsInt, mode) || DEFAULT_UNIT_CENTS;
     const totalCents = unitAmount * creditsInt;
 
+    const isSubscription = mode === 'subscription';
+
     const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
+      mode: isSubscription ? 'subscription' : 'payment',
       payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
             currency: 'usd',
             product_data: {
-              name: 'Email Verification Credits',
-              description: 'Pay-as-you-go credits for email validation',
+              name: isSubscription
+                ? 'Email Verification Credits Subscription'
+                : 'Email Verification Credits',
+              description: isSubscription
+                ? `${creditsInt.toLocaleString()} credits per month`
+                : 'Pay-as-you-go credits for email validation',
             },
             unit_amount: unitAmount, // cents per credit
+            ...(isSubscription ? { recurring: { interval: 'month' } } : {}),
           },
           quantity: creditsInt,
         },
@@ -76,6 +84,9 @@ router.post('/create-checkout-session', requireAuth, async (req, res) => {
         credits: String(creditsInt),
         mode: mode || 'payg',
       },
+      ...(isSubscription
+        ? { subscription_data: { metadata: { userId, credits: String(creditsInt) } } }
+        : {}),
     });
 
     return res.json({ success: true, url: session.url });
@@ -116,17 +127,24 @@ async function handleStripeWebhook(req, res) {
         const credits = Number(session.metadata?.credits || 0);
         const paymentIntentId = session.payment_intent;
 
-        if (userId && credits > 0 && paymentIntentId) {
-          // Idempotent add using payment intent as reference
+        if (userId && credits > 0 && (paymentIntentId || session.mode === 'subscription')) {
+          // For one-time payments use payment_intent; for subscriptions use subscription id
+          const reference = session.mode === 'subscription'
+            ? `stripe:sub:${session.subscription}`
+            : `stripe:${paymentIntentId}`;
+
+          // Idempotent add using reference
           await creditService.addCredits(
             userId,
             credits,
             'purchase',
-            `stripe:${paymentIntentId}`,
+            reference,
             'Stripe Checkout purchase',
             {
               checkoutSessionId: session.id,
               customer: session.customer,
+              mode: session.mode,
+              subscriptionId: session.subscription || null,
             }
           );
         } else {

@@ -32,11 +32,10 @@ export default function PricingPage() {
 	};
 
 	const handleCheckout = async () => {
-		if (mode === 'subscription') return; // Subscription flow not implemented yet
 		setIsLoading(true);
 		try {
 			const token = await getToken();
-			const { success, url } = await createCheckoutSession(token, selectedCredits);
+			const { success, url } = await createCheckoutSession(token, selectedCredits, mode);
 			if (success && url) {
 				window.location.href = url;
 			}
@@ -120,10 +119,10 @@ export default function PricingPage() {
 					<div className="mt-6">
 						<Button
 							onClick={handleCheckout}
-							disabled={mode === 'subscription' || isLoading}
+							disabled={isLoading}
 							className="w-full bg-[#295c51] hover:bg-[#1e453c]"
 						>
-							{mode === 'subscription' ? 'Subscription coming soon' : isLoading ? 'Creating checkout...' : 'Next'}
+							{isLoading ? 'Creating checkout...' : 'Next'}
 						</Button>
 					</div>
 				</Card>

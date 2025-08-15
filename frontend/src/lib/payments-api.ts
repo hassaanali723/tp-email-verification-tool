@@ -13,10 +13,10 @@ export async function getPaymentsConfig(token: string | null): Promise<PaymentsC
   return res.json();
 }
 
-export async function createCheckoutSession(token: string | null, credits: number): Promise<{ success: boolean; url: string }>{
+export async function createCheckoutSession(token: string | null, credits: number, mode: 'payg' | 'subscription' = 'payg'): Promise<{ success: boolean; url: string }>{
   const res = await authenticatedApiFetch('/api/payments/create-checkout-session', token, {
     method: 'POST',
-    body: JSON.stringify({ credits, mode: 'payg' })
+    body: JSON.stringify({ credits, mode })
   });
   if (!res.ok) throw new Error(`Failed to create checkout session (${res.status})`);
   return res.json();
