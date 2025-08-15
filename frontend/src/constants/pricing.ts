@@ -27,8 +27,15 @@ export function getTierForCredits(credits: number): PricingTier {
 }
 
 export function clampCredits(raw: number): number {
-	if (!Number.isFinite(raw)) return PRICING_TIERS[0].credits;
-	return Math.max(PRICING_TIERS[0].credits, Math.floor(raw));
+	if (!Number.isFinite(raw)) return 100;
+	return Math.max(100, Math.floor(raw));
+}
+
+// Price per credit rule for small purchases
+// If credits < 1000, use $0.01 per credit, otherwise tier pricing
+export function getPricePerCredit(credits: number): number {
+	if (credits < 1000) return 0.01;
+	return getTierForCredits(credits).pricePerCredit;
 }
 
 
