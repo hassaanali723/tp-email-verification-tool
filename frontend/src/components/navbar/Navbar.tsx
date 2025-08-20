@@ -2,7 +2,7 @@
 
 import { Bell } from 'lucide-react'
 import { UserButton } from '@clerk/nextjs'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '@clerk/nextjs'
 import { fetchCreditBalance, fetchRecentCreditTransactions, type CreditTransaction } from '@/lib/payments-api'
 import { CREDIT_BALANCE_REFRESH } from '@/lib/events'
@@ -41,6 +41,8 @@ export function Navbar() {
   const [hasNotifications, setHasNotifications] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [recent, setRecent] = useState<CreditTransaction[]>([]);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const navTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -61,6 +63,48 @@ export function Navbar() {
     window.addEventListener(CREDIT_BALANCE_REFRESH, handler);
     return () => window.removeEventListener(CREDIT_BALANCE_REFRESH, handler);
   }, [getToken]);
+
+  // Simple route progress bar below navbar
+  useEffect(() => {
+    const handleStart = () => {
+      if (navTimeoutRef.current) window.clearTimeout(navTimeoutRef.current);
+      setIsNavigating(true);
+      // Safety timeout to hide after 2.5s in case navigation completes silently
+      navTimeoutRef.current = window.setTimeout(() => setIsNavigating(false), 2500);
+    };
+    const handleEnd = () => {
+      if (navTimeoutRef.current) window.clearTimeout(navTimeoutRef.current);
+      // Small delay for smoother UX
+      navTimeoutRef.current = window.setTimeout(() => setIsNavigating(false), 200);
+    };
+
+    const clickListener = () => {
+      // Optimistic start on any click to make UI feel responsive
+      handleStart();
+    };
+
+    window.addEventListener('click', clickListener, { capture: true });
+    window.addEventListener('beforeunload', handleStart);
+    window.addEventListener('pageshow', handleEnd);
+    window.addEventListener('popstate', handleStart);
+    return () => {
+      window.removeEventListener('click', clickListener, { capture: true } as any);
+      window.removeEventListener('beforeunload', handleStart);
+      window.removeEventListener('pageshow', handleEnd);
+      window.removeEventListener('popstate', handleStart);
+      if (navTimeoutRef.current) window.clearTimeout(navTimeoutRef.current);
+    };
+  }, []);
+
+  // Complete bar when route changes
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  useEffect(() => {
+    // Finish shortly after route mutation
+    if (isNavigating) {
+      const id = window.setTimeout(() => setIsNavigating(false), 300);
+      return () => window.clearTimeout(id);
+    }
+  }, [pathname]);
 
   return (
     <div className="h-16 bg-white border-b border-gray-100">
@@ -142,6 +186,11 @@ export function Navbar() {
           />
         </div>
       </div>
+      {isNavigating && (
+        <div className="h-0.5 w-full bg-transparent overflow-hidden">
+          <div className="h-full w-1/3 bg-[#16a34a] animate-[routeProgress_1.2s_ease-in-out_infinite]" />
+        </div>
+      )}
     </div>
   )
 }

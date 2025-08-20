@@ -229,7 +229,7 @@ export default function FilesList() {
                       }
                       startVerification(file.id);
                     }}
-                    className="bg-[#295c51] hover:bg-[#1e453c]"
+                    className="bg-[#295c51] hover:bg-[#1e453c] cursor-pointer"
                   >
                     Start Verification
                   </Button>
@@ -238,6 +238,7 @@ export default function FilesList() {
                   <Button 
                     variant="outline"
                     onClick={() => router.push(`/results/${file.id}`)}
+                    className="cursor-pointer"
                   >
                     {file.status === 'processing' ? 'View Progress' : 'View Details'}
                     <ChevronRight className="h-4 w-4 ml-1" />
