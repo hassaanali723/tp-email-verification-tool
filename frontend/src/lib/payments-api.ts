@@ -8,13 +8,14 @@ export interface PaymentsConfig {
 }
 
 export async function getPaymentsConfig(token: string | null): Promise<PaymentsConfig> {
-  const res = await authenticatedApiFetch('/api/payments/config', token, { method: 'GET' });
+  // Base URL is expected to include /api, so endpoints here should not
+  const res = await authenticatedApiFetch('/payments/config', token, { method: 'GET' });
   if (!res.ok) throw new Error(`Failed to load payments config (${res.status})`);
   return res.json();
 }
 
 export async function createCheckoutSession(token: string | null, credits: number, mode: 'payg' | 'subscription' = 'payg'): Promise<{ success: boolean; url: string }>{
-  const res = await authenticatedApiFetch('/api/payments/create-checkout-session', token, {
+  const res = await authenticatedApiFetch('/payments/create-checkout-session', token, {
     method: 'POST',
     body: JSON.stringify({ credits, mode })
   });

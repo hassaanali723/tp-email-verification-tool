@@ -7,34 +7,35 @@ const logger = require('../utils/logger');
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 const stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' });
 
-// Dynamic tiered pricing (cents per credit). Highest threshold <= credits wins.
-const PRICING_TIERS_CENTS = [
-  { threshold: 2000, unitCents: Math.round(0.0075 * 100) },
-  { threshold: 5000, unitCents: Math.round(0.0060 * 100) },
-  { threshold: 10000, unitCents: Math.round(0.0055 * 100) },
-  { threshold: 25000, unitCents: Math.round(0.0050 * 100) },
-  { threshold: 50000, unitCents: Math.round(0.0045 * 100) },
-  { threshold: 100000, unitCents: Math.round(0.0040 * 100) },
-  { threshold: 250000, unitCents: Math.round(0.0035 * 100) },
-  { threshold: 500000, unitCents: Math.round(0.0030 * 100) },
-  { threshold: 1000000, unitCents: Math.round(0.0025 * 100) },
+// Match frontend pricing exactly (USD per credit). Highest threshold <= credits wins.
+// Keep these numbers in sync with frontend/src/constants/pricing.ts
+const PRICING_TIERS_USD = [
+  { threshold: 2000, pricePerCredit: 0.0075 },
+  { threshold: 5000, pricePerCredit: 0.0060 },
+  { threshold: 10000, pricePerCredit: 0.0055 },
+  { threshold: 25000, pricePerCredit: 0.0050 },
+  { threshold: 50000, pricePerCredit: 0.0045 },
+  { threshold: 100000, pricePerCredit: 0.0040 },
+  { threshold: 250000, pricePerCredit: 0.0035 },
+  { threshold: 500000, pricePerCredit: 0.0030 },
+  { threshold: 1000000, pricePerCredit: 0.0025 },
 ];
 
-function getUnitAmountCents(credits, mode) {
-  const sorted = [...PRICING_TIERS_CENTS].sort((a, b) => a.threshold - b.threshold);
+function getPricePerCreditUSD(credits, mode) {
+  const sorted = [...PRICING_TIERS_USD].sort((a, b) => a.threshold - b.threshold);
   let selected = sorted[0];
   for (const tier of sorted) {
     if (credits >= tier.threshold) selected = tier; else break;
   }
-  let unit = selected.unitCents;
+  let price = selected.pricePerCredit; // USD per credit
   if (mode === 'subscription') {
-    unit = Math.round(unit * 0.95); // 5% discount for subscriptions
+    price = price * 0.95; // 5% discount for subscriptions
   }
-  return unit;
+  return price;
 }
 
-const DEFAULT_UNIT_CENTS = Number(process.env.PRICE_PER_CREDIT_CENTS || 1); // fallback 1 cent
-const PRICE_PER_CREDIT_CENTS = PRICING_TIERS_CENTS[0]?.unitCents || DEFAULT_UNIT_CENTS;
+const DEFAULT_PRICE_PER_CREDIT_USD = Number(process.env.PRICE_PER_CREDIT_USD || 0.01);
+const PRICE_PER_CREDIT_CENTS = Math.round((PRICING_TIERS_USD[0]?.pricePerCredit || DEFAULT_PRICE_PER_CREDIT_USD) * 100);
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 // Standard router for JSON endpoints
@@ -51,8 +52,8 @@ router.post('/create-checkout-session', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid credits amount' });
     }
 
-    const unitAmount = getUnitAmountCents(creditsInt, mode) || DEFAULT_UNIT_CENTS;
-    const totalCents = unitAmount * creditsInt;
+    const pricePerCreditUSD = getPricePerCreditUSD(creditsInt, mode) || DEFAULT_PRICE_PER_CREDIT_USD;
+    const totalCents = Math.round(pricePerCreditUSD * creditsInt * 100); // USD -> cents
 
     const isSubscription = mode === 'subscription';
 
@@ -65,16 +66,17 @@ router.post('/create-checkout-session', requireAuth, async (req, res) => {
             currency: 'usd',
             product_data: {
               name: isSubscription
-                ? 'Email Verification Credits Subscription'
-                : 'Email Verification Credits',
+                ? `Subscription – ${creditsInt.toLocaleString()} credits / month`
+                : `${creditsInt.toLocaleString()} credits` ,
               description: isSubscription
-                ? `${creditsInt.toLocaleString()} credits per month`
+                ? `Monthly package of ${creditsInt.toLocaleString()} credits`
                 : 'Pay-as-you-go credits for email validation',
             },
-            unit_amount: unitAmount, // cents per credit
+            // Use total amount in cents to avoid fractional cent pricing
+            unit_amount: totalCents,
             ...(isSubscription ? { recurring: { interval: 'month' } } : {}),
           },
-          quantity: creditsInt,
+          quantity: 1,
         },
       ],
       success_url: `${FRONTEND_URL}/dashboard?payment=success`,
