@@ -34,7 +34,14 @@ router.get('/events/:fileId', (req, res) => {
 // Helper to send SSE event to all clients for a fileId
 function sendSseEvent(fileId, event, data) {
     if (!sseClients[fileId]) return;
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    let json = '';
+    try {
+        json = JSON.stringify(data);
+    } catch (e) {
+        // Fallback to plain object without circular refs
+        json = JSON.stringify({ error: 'serialization_failed' });
+    }
+    const payload = `event: ${event}\ndata: ${json}\n\n`;
     sseClients[fileId].forEach(res => {
         try {
             res.write(payload);

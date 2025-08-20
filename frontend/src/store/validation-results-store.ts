@@ -80,13 +80,14 @@ function subscribeToSSE(
       console.log('Parsed validation update data:', data);
       
       // Get fresh token for each request
-      const token = await getTokenFn();
+      let token = await getTokenFn();
+      // Token can expire; if Unauthorized occurs we'll retry once after refreshing
       if (!token) {
         throw new Error('No authentication token available');
       }
 
       // Fetch fresh stats and email list
-      const [statsResponse, emailsResponse] = await Promise.all([
+      let [statsResponse, emailsResponse] = await Promise.all([
         fetchValidationStats(fileId, token),
         fetchEmailList(fileId, 1, 50, '', token)
       ]);
@@ -100,6 +101,23 @@ function subscribeToSSE(
       });
     } catch (err) {
       console.error('Error handling validation update:', err);
+      // If auth error or empty JSON, attempt a one-time retry with a fresh token
+      const message = (err as Error).message || '';
+      if (message.includes('401') || message.includes('Unauthorized') || message.includes('empty response')) {
+        try {
+          const retryToken = await getTokenFn();
+          if (retryToken) {
+            const [statsResponse, emailsResponse] = await Promise.all([
+              fetchValidationStats(fileId, retryToken),
+              fetchEmailList(fileId, 1, 50, '', retryToken)
+            ]);
+            onUpdate({ stats: statsResponse.data || statsResponse, emails: emailsResponse });
+            return; // recovered
+          }
+        } catch (e) {
+          console.error('Retry after token refresh failed:', e);
+        }
+      }
       onError(err as Error);
       
       // If we get an auth error, close the connection

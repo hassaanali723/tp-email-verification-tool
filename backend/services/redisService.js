@@ -235,13 +235,16 @@ class RedisService {
 
     async _updateEmailBatches(data) {
         try {
-            const requestId = await this.publisher.get(`batch_parent:${data.batchId}`);
-            if (!requestId) {
-                logger.error('No parent requestId found for batch:', { batchId: data.batchId });
-                return;
-            }
+            // Prefer mapping if available, but fall back to direct lookup by batchId
+            const requestId = await this.publisher.get(`batch_parent:${data.batchId}`).catch(() => null);
 
-            const emailBatches = await EmailBatches.findOne({ requestId }).exec();
+            let emailBatches = null;
+            if (requestId) {
+                emailBatches = await EmailBatches.findOne({ requestId }).exec();
+            }
+            if (!emailBatches) {
+                emailBatches = await EmailBatches.findOne({ batchIds: data.batchId }).exec();
+            }
             if (!emailBatches) {
                 logger.error('EmailBatches document not found:', { requestId, batchId: data.batchId });
                 return;
