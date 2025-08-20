@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@clerk/nextjs'
 import { fetchFilesWithLimit, fetchUserAggregateStats } from '@/lib/file-api'
-import { fetchCreditBalance } from '@/lib/payments-api'
+import { fetchCreditBalance, downloadCreditReport } from '@/lib/payments-api'
 
 interface RecentFileRow {
   id: string
@@ -104,10 +104,28 @@ export default function DashboardPage() {
           </div>
 
           {/* Download button */}
-          <Link href="/dashboard/download" className="mt-4 inline-flex items-center px-4 py-2 rounded-lg bg-gray-100 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
+          <button
+            onClick={async () => {
+              try {
+                const token = await getToken();
+                const blob = await downloadCreditReport(token || '');
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `credit-report-${Date.now()}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+              } catch (e) {
+                console.error('Failed to download report', e);
+              }
+            }}
+            className="mt-4 inline-flex items-center px-4 py-2 rounded-lg bg-gray-100 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+          >
             <Download className="h-4 w-4 mr-2" />
             Download report
-          </Link>
+          </button>
         </div>
 
         {/* Verified emails card */}

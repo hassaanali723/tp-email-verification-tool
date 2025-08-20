@@ -22,6 +22,16 @@ export async function createCheckoutSession(token: string | null, credits: numbe
   return res.json();
 }
 
+export async function downloadCreditReport(token: string | null): Promise<Blob> {
+  const urlBase = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '');
+  if (!token) throw new Error('Authentication token is required');
+  const res = await fetch(`${urlBase}/credits/report`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Failed to download report (${res.status})`);
+  return res.blob();
+}
+
 export interface CreditBalanceResponse {
   success: boolean;
   data: { balance: number };

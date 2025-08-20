@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const File = require('../models/File');
 const creditService = require('../services/creditService');
 const { requireAuth } = require('../middleware/auth');
 const logger = require('../utils/logger');
@@ -320,6 +321,69 @@ router.get('/history', async (req, res) => {
       message: 'Failed to get transaction history',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
+  }
+});
+
+/**
+ * @route GET /api/credits/report
+ * @desc Generate a CSV report of user's credit usage and overall stats
+ * @access Private
+ */
+router.get('/report', async (req, res) => {
+  try {
+    const userId = req.auth.userId;
+
+    const balanceSummary = await creditService.getBalance(userId);
+    const history = await creditService.getTransactionHistory(userId, { page: 1, limit: 1000 });
+
+    // CSV header
+    const rows = [];
+    rows.push(['Report Generated At', new Date().toISOString()]);
+    rows.push(['Current Balance', balanceSummary.balance]);
+    rows.push(['Total Purchased', balanceSummary.totalPurchased]);
+    rows.push(['Total Consumed', balanceSummary.totalConsumed]);
+    rows.push([]);
+    rows.push(['Type', 'Amount', 'Reference', 'Description', 'Timestamp']);
+
+    for (const t of history.transactions) {
+      let description = (t.description || '').replace(/\n|\r/g, ' ');
+      const metaFileId = t.metadata && (t.metadata.fileId || t.metadata.file_id);
+      if (metaFileId) {
+        try {
+          const fileDoc = await File.findOne({ _id: metaFileId, userId }).lean();
+          if (fileDoc) {
+            const displayName = fileDoc.originalName || fileDoc.filename;
+            description = description.replace(/file\s+[a-f0-9]{24}/i, `file "${displayName}"`);
+          } else {
+            const masked = String(metaFileId).slice(0, 6) + '…' + String(metaFileId).slice(-4);
+            description = description.replace(/file\s+[a-f0-9]{24}/i, `file ${masked}`);
+          }
+        } catch (e) {
+          // ignore lookup errors
+        }
+      }
+
+      rows.push([
+        t.type,
+        t.amount,
+        t.reference,
+        description,
+        new Date(t.timestamp).toISOString(),
+      ]);
+    }
+
+    // Build CSV string
+    const csv = rows.map(r => r.map(v => {
+      const s = String(v ?? '');
+      return s.includes(',') ? `"${s.replace(/"/g, '""')}"` : s;
+    }).join(',')).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="credit-report-${Date.now()}.csv"`);
+    return res.status(200).send(csv);
+  } catch (error) {
+    logger.error('Error generating credit report:', { userId: req.auth?.userId, error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to generate report' });
   }
 });
 
