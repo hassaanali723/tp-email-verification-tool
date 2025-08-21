@@ -541,6 +541,30 @@ class CreditService {
   }
 
   /**
+   * Get total consumed credits for a specific file for a user
+   * Uses embedded transactions to compute accurate per-file consumption
+   * @param {String} userId
+   * @param {String} fileId
+   * @returns {Promise<number>} total consumed credits for this file
+   */
+  async getConsumedForFile(userId, fileId) {
+    try {
+      if (!userId || !fileId) return 0;
+      const doc = await UserCredits.findOne({ userId }).select('transactions').lean();
+      if (!doc || !Array.isArray(doc.transactions)) return 0;
+      return doc.transactions.reduce((sum, t) => {
+        if (t.type !== 'consumption') return sum;
+        const tFileId = t?.metadata?.fileId || t?.metadata?.file_id;
+        if (!tFileId) return sum;
+        return String(tFileId) === String(fileId) ? sum + Math.abs(t.amount || 0) : sum;
+      }, 0);
+    } catch (e) {
+      logger.error('Error computing consumed credits for file:', { userId, fileId, error: e.message });
+      return 0;
+    }
+  }
+
+  /**
    * Private method to find or create user credits
    * @private
    */

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const File = require('../models/File');
+const UserCredits = require('../models/UserCredits');
 const creditService = require('../services/creditService');
 const { requireAuth } = require('../middleware/auth');
 const logger = require('../utils/logger');
@@ -247,7 +248,8 @@ router.get('/history', async (req, res) => {
       limit = 20,
       type,
       startDate,
-      endDate
+      endDate,
+      group // optional: 'by_file' to aggregate consumption by file
     } = req.query;
     
     // Validate pagination parameters
@@ -302,8 +304,101 @@ router.get('/history', async (req, res) => {
     };
     
     const history = await creditService.getTransactionHistory(userId, options);
-    
-    res.json({
+
+    // Optional aggregation for notifications: group consumption transactions by fileId
+    if (group === 'by_file') {
+      // Load full month of transactions directly to avoid pagination loss
+      const now = new Date();
+      const defaultStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const rangeStart = parsedStartDate || defaultStart;
+      const rangeEnd = parsedEndDate || now;
+
+      const uc = await UserCredits.findOne({ userId }).lean();
+      const all = Array.isArray(uc?.transactions) ? uc.transactions : [];
+
+      // Filter by date range (all types)
+      const inRange = all.filter(t => {
+        const ts = new Date(t.timestamp);
+        return ts >= rangeStart && ts <= rangeEnd;
+      });
+
+      // Build groups keyed by fileId for consumption; include purchases/trials/refunds as-is
+      const groups = new Map();
+      const others = [];
+      for (const t of inRange) {
+        if (t.type === 'consumption') {
+          let fileId = t?.metadata?.fileId || t?.metadata?.file_id;
+          if (!fileId && typeof t.reference === 'string') {
+            const m = t.reference.match(/([0-9a-fA-F]{24})/);
+            if (m) fileId = m[1];
+          }
+          if (!fileId) continue;
+
+          if (!groups.has(fileId)) {
+            groups.set(fileId, {
+              type: 'consumption',
+              amount: 0,
+              fileId,
+              timestamp: t.timestamp
+            });
+          }
+          const g = groups.get(fileId);
+          g.amount += Math.abs(t.amount || 0);
+          g.timestamp = g.timestamp && g.timestamp > t.timestamp ? g.timestamp : t.timestamp;
+        } else if (['purchase', 'trial', 'refund'].includes(t.type)) {
+          others.push(t);
+        }
+      }
+
+      // Resolve file names for nicer descriptions
+      const groupedArray = Array.from(groups.values());
+      const fileIds = groupedArray.map(g => g.fileId);
+      let filesById = new Map();
+      if (fileIds.length) {
+        try {
+          const files = await File.find({ _id: { $in: fileIds }, userId }).select('originalName filename').lean();
+          filesById = new Map(files.map(f => [String(f._id), f]));
+        } catch (e) {
+          // ignore lookup errors
+        }
+      }
+
+      const aggregated = groupedArray
+        .map(g => {
+          const f = filesById.get(String(g.fileId));
+          const displayName = f?.originalName || f?.filename || `${String(g.fileId).slice(0,6)}…${String(g.fileId).slice(-4)}`;
+          return {
+            type: 'consumption',
+            amount: g.amount,
+            reference: `agg:${g.fileId}`,
+            description: `Email validation for "${displayName}"`,
+            metadata: { fileId: g.fileId, aggregated: true },
+            timestamp: g.timestamp
+          };
+        })
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+      const normalizedOthers = others.map(t => ({
+        type: t.type,
+        amount: Math.abs(t.amount || 0),
+        reference: t.reference,
+        description: t.description,
+        metadata: t.metadata || {},
+        timestamp: t.timestamp
+      }));
+
+      const combined = [...aggregated, ...normalizedOthers]
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .slice(0, limitNum);
+
+      return res.json({
+        success: true,
+        data: { items: combined, total: combined.length },
+        message: 'Grouped transaction history retrieved successfully'
+      });
+    }
+
+    return res.json({
       success: true,
       data: history,
       message: 'Transaction history retrieved successfully'

@@ -119,29 +119,50 @@ class RedisService {
 
             // First update EmailResults
             await this._updateEmailResults(data);
-            
-            // Then update EmailBatches
-            await this._updateEmailBatches(data);
 
-            // Get fileId and userId from EmailResults
+            // Get fileId and userId from EmailResults to compute stats and stream consumption
             const emailResult = await EmailResults.findOne({ batchId: data.batchId }, { fileId: 1, userId: 1 });
             if (emailResult && emailResult.fileId) {
                 const fileId = emailResult.fileId;
                 const userId = emailResult.userId;
-                
-                // Get and publish stats
-                const stats = await statisticsService.getFileStats(fileId, userId);
-                await this.publisher.publish(`file_stats:${fileId}`, JSON.stringify(stats));
 
-                // Get and publish email list (first page)
+                // Get fresh stats after results update
+                const stats = await statisticsService.getFileStats(fileId, userId);
+
+                // Incremental credit consumption BEFORE updating batches/completion and before notifying clients
+                try {
+                    const processed = Number(stats?.progress?.processed || 0);
+                    const consumedKey = `consumed:${userId}:${fileId}`;
+                    const lastConsumed = Number(await this.publisher.get(consumedKey)) || 0;
+                    const delta = Math.max(0, processed - lastConsumed);
+                    if (delta > 0) {
+                        const transactionRef = `progress:${fileId}:${processed}`;
+                        await creditService.deductCredits(
+                            userId,
+                            delta,
+                            transactionRef,
+                            `Progress credits for file ${fileId} (+${delta})`,
+                            { fileId, type: 'validation_progress', processed }
+                        );
+                        await this.publisher.set(consumedKey, String(processed));
+                    }
+                } catch (incErr) {
+                    logger.error('Incremental credit consumption error:', {
+                        batchId: data.batchId,
+                        error: incErr.message
+                    });
+                }
+
+                // Publish stats and first-page emails for live UI update
+                await this.publisher.publish(`file_stats:${fileId}`, JSON.stringify(stats));
                 const emailList = await statisticsService.getEmailList(fileId, userId);
                 await this.publisher.publish(`file_emails:${fileId}`, JSON.stringify(emailList));
-                
-                logger.info(`Published stats and email list for fileId: ${fileId}`);
-
-                // Notify SSE clients for this fileId
                 sendSseEvent(fileId, 'validationUpdate', { fileId, stats });
+                logger.info(`Published stats and email list for fileId: ${fileId}`);
             }
+
+            // Finally, update EmailBatches which may trigger completion handling
+            await this._updateEmailBatches(data);
             
         } catch (error) {
             logger.error('Batch update processing failed:', { 
@@ -323,73 +344,34 @@ class RedisService {
                 totalEmails
             });
 
-            // Generate the same reservation ID pattern that was used during validation start
-            // This is a simplified approach - in production you'd store this in the database
-            const reservationId = `validation_${fileId}_*`; // Pattern to find reservation
-            
-            // Generate transaction reference for the consumption
-            const transactionRef = `completed_validation_${fileId}_${Date.now()}`;
-            
+            // Determine how many credits remain unconsumed using authoritative history
+            const consumedKey = `consumed:${userId}:${fileId}`;
+            const consumedRedis = Number(await this.publisher.get(consumedKey)) || 0;
+            const consumedActual = await creditService.getConsumedForFile(userId, fileId);
+            const consumedSoFar = Math.max(consumedRedis, consumedActual);
+            const remaining = Math.max(0, Number(totalEmails || 0) - consumedSoFar);
+
+            // Always attempt to release any reservation; we'll directly deduct remaining if needed
             try {
-                // Try to consume reserved credits first
-                // If no reservation found, this will fail gracefully
-                await creditService.consumeReservedCredits(
-                    userId,
-                    reservationId,
-                    transactionRef,
-                    { 
-                        fileId, 
-                        emailCount: totalEmails,
-                        completedAt: new Date(),
-                        type: 'validation_completion'
-                    }
-                );
+                const reservationPattern = `validation_${fileId}_*`;
+                await creditService.releaseReservedCredits(userId, reservationPattern, 'Release after streaming consumption');
+            } catch (e) {
+                logger.warn('Releasing reservation failed (may not exist):', { fileId, error: e.message });
+            }
 
-                logger.info('Reserved credits converted to consumption successfully:', {
-                    userId,
-                    fileId,
-                    emailCount: totalEmails,
-                    transactionRef
-                });
-
-            } catch (creditError) {
-                // If reservation consumption fails, fall back to direct deduction
-                // This handles cases where reservation might have been lost
-                logger.warn('Failed to consume reserved credits, attempting direct deduction:', {
-                    userId,
-                    fileId,
-                    emailCount: totalEmails,
-                    error: creditError.message
-                });
-
+            if (remaining > 0) {
+                const transactionRef = `completed_remaining_${fileId}_${Date.now()}`;
                 try {
                     await creditService.deductCredits(
                         userId,
-                        totalEmails,
+                        remaining,
                         transactionRef,
-                        `Email validation completed for file ${fileId} (${totalEmails} emails) - Fallback`,
-                        { 
-                            fileId, 
-                            emailCount: totalEmails,
-                            completedAt: new Date(),
-                            type: 'validation_completion',
-                            fallback: true
-                        }
+                        `Completion credits for file ${fileId} (+${remaining})`,
+                        { fileId, type: 'validation_completion_remaining' }
                     );
-
-                    logger.info('Fallback credit deduction successful:', {
-                        userId,
-                        fileId,
-                        emailCount: totalEmails
-                    });
-
-                } catch (fallbackError) {
-                    logger.error('Both reserved and direct credit consumption failed:', {
-                        userId,
-                        fileId,
-                        emailCount: totalEmails,
-                        error: fallbackError.message
-                    });
+                    await this.publisher.set(consumedKey, String(consumedSoFar + remaining));
+                } catch (finalErr) {
+                    logger.error('Final credit deduction failed:', { fileId, remaining, error: finalErr.message });
                 }
             }
 
