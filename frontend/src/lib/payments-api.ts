@@ -23,6 +23,76 @@ export async function createCheckoutSession(token: string | null, credits: numbe
   return res.json();
 }
 
+// Subscription APIs
+export interface SubscriptionStatus {
+  planType: 'trial' | 'payg' | 'subscription';
+  status?: string;
+  cancelAtPeriodEnd?: boolean;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+  creditsPerMonth?: number | null;
+  subscriptionId?: string | null;
+  balance?: number;
+}
+
+export async function fetchSubscription(token: string | null): Promise<SubscriptionStatus> {
+  const res = await authenticatedApiFetch('/payments/subscription', token, { method: 'GET' });
+  if (!res.ok) throw new Error(`Failed to fetch subscription (${res.status})`);
+  const json = await res.json();
+  return json?.data as SubscriptionStatus;
+}
+
+export interface BillingItem {
+  type: 'purchase' | 'trial' | 'refund';
+  amount: number;
+  reference?: string;
+  description?: string;
+  timestamp?: string;
+}
+
+export async function fetchBillingHistory(token: string | null, limit: number = 50): Promise<BillingItem[]> {
+  const res = await authenticatedApiFetch(`/payments/billing-history?limit=${encodeURIComponent(String(limit))}`, token, { method: 'GET' });
+  if (!res.ok) throw new Error(`Failed to fetch billing history (${res.status})`);
+  const json = await res.json();
+  return (json?.data?.items || []) as BillingItem[];
+}
+
+export async function cancelSubscription(token: string | null): Promise<{ success: boolean }>{
+  const res = await authenticatedApiFetch('/payments/cancel-subscription', token, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to cancel subscription (${res.status})`);
+  return res.json();
+}
+
+export async function cancelSubscriptionNow(token: string | null): Promise<{ success: boolean }>{
+  const res = await authenticatedApiFetch('/payments/cancel-subscription-now', token, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to cancel subscription now (${res.status})`);
+  return res.json();
+}
+
+export async function resumeSubscription(token: string | null): Promise<{ success: boolean }>{
+  const res = await authenticatedApiFetch('/payments/resume-subscription', token, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to resume subscription (${res.status})`);
+  return res.json();
+}
+
+export interface InvoiceItem {
+  id: string;
+  number?: string;
+  status?: string;
+  amountDue?: number;
+  currency?: string;
+  created?: string | null;
+  hostedInvoiceUrl?: string | null;
+  invoicePdf?: string | null;
+}
+
+export async function fetchInvoices(token: string | null): Promise<InvoiceItem[]> {
+  const res = await authenticatedApiFetch('/payments/invoices', token, { method: 'GET' });
+  if (!res.ok) throw new Error(`Failed to load invoices (${res.status})`);
+  const json = await res.json();
+  return (json?.data || []) as InvoiceItem[];
+}
+
 export async function downloadCreditReport(token: string | null): Promise<Blob> {
   const urlBase = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '');
   if (!token) throw new Error('Authentication token is required');
@@ -62,8 +132,9 @@ export interface CreditHistoryResponse {
   } | CreditTransaction[];
 }
 
-export async function fetchRecentCreditTransactions(token: string | null, limit: number = 5): Promise<CreditTransaction[]> {
-  const res = await authenticatedApiFetch(`/credits/history?limit=${encodeURIComponent(String(limit))}`, token, { method: 'GET' });
+export async function fetchRecentCreditTransactions(token: string | null, limit: number = 5, groupedByFile: boolean = true): Promise<CreditTransaction[]> {
+  const groupParam = groupedByFile ? '&group=by_file' : '';
+  const res = await authenticatedApiFetch(`/credits/history?limit=${encodeURIComponent(String(limit))}${groupParam}`, token, { method: 'GET' });
   if (!res.ok) throw new Error(`Failed to fetch credit history (${res.status})`);
   const json = (await res.json()) as CreditHistoryResponse;
   // Handle both array and object-based responses

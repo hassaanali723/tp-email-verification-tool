@@ -52,6 +52,22 @@ const UserCreditsSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  // Optional Stripe linkage for subscriptions and billing portal
+  stripeCustomerId: {
+    type: String,
+    required: false,
+    index: true,
+    sparse: true
+  },
+  lastSubscriptionId: {
+    type: String,
+    required: false
+  },
+  subscriptionCredits: {
+    type: Number,
+    required: false,
+    min: 0
+  },
   balance: {
     type: Number,
     required: true,

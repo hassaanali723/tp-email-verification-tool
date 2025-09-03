@@ -13,13 +13,15 @@ import {
   Upload,
   CreditCard,
   User,
-  LogOut
+  LogOut,
+  Receipt
 } from 'lucide-react'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Validate', href: '/validate', icon: Upload },
   { name: 'Pricing', href: '/pricing', icon: CreditCard },
+  { name: 'Subscription', href: '/subscription', icon: Receipt },
 ]
 
 // Clerk appearance configuration
