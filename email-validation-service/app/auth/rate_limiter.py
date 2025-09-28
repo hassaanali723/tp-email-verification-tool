@@ -42,8 +42,8 @@ limiter = Limiter(
 
 # Rate limit configurations
 RATE_LIMITS = {
-    "batch_validation": "20/minute",      # Main validation endpoint
-    "single_validation": "20/minute",    # Single email validation  
+    "batch_validation": "40/minute",      # Main validation endpoint
+    "single_validation": "40/minute",    # Single email validation  
     "status_check": "50/minute",         # Status endpoints
-    "admin": "20/minute",                 # Admin endpoints
+    "admin": "50/minute",                 # Admin endpoints
 } 
