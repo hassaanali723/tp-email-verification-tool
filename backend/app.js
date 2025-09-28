@@ -9,6 +9,7 @@ const emailValidationRoutes = require("./routes/emailValidation");
 const eventsRoutes = require('./routes/events');
 const creditRoutes = require('./routes/credits');
 const paymentsRoutes = require('./routes/payments');
+const supportRoutes = require('./routes/support');
 
 const app = express();
 
@@ -27,6 +28,8 @@ app.use('/api/email-validation', emailValidationRoutes);
 app.use('/api/credits', creditRoutes);
 app.use('/api/payments', paymentsRoutes.router);
 app.use('/api', eventsRoutes.router);
+app.use('/api/support', supportRoutes);
+app.use('/uploads', express.static(require('path').join(__dirname, 'uploads')));
 
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/email-verification';

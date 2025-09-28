@@ -14,7 +14,8 @@ import {
   CreditCard,
   User,
   LogOut,
-  Receipt
+  Receipt,
+  LifeBuoy
 } from 'lucide-react'
 
 const navigation = [
@@ -22,6 +23,7 @@ const navigation = [
   { name: 'Validate', href: '/validate', icon: Upload },
   { name: 'Pricing', href: '/pricing', icon: CreditCard },
   { name: 'Subscription', href: '/subscription', icon: Receipt },
+  { name: 'Support', href: '/support', icon: LifeBuoy },
 ]
 
 // Clerk appearance configuration

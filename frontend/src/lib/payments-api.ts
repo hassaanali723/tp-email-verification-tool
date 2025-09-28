@@ -93,6 +93,43 @@ export async function fetchInvoices(token: string | null): Promise<InvoiceItem[]
   return (json?.data || []) as InvoiceItem[];
 }
 
+// Support API
+export interface SupportTicket {
+  _id: string;
+  name: string;
+  email: string;
+  problem: string;
+  imageUrl?: string;
+  status: 'open' | 'closed';
+  createdAt?: string;
+}
+
+export async function submitSupportTicket(token: string | null, data: { name: string; email: string; problem: string; imageFile?: File | null }): Promise<SupportTicket> {
+  if (!token) throw new Error('Authentication token is required');
+  const form = new FormData();
+  form.append('name', data.name);
+  form.append('email', data.email);
+  form.append('problem', data.problem);
+  if (data.imageFile) form.append('image', data.imageFile);
+
+  const url = `${(process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '')}/support/submit`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Failed to submit ticket (${res.status})`);
+  const json = await res.json();
+  return json?.data as SupportTicket;
+}
+
+export async function fetchMyTickets(token: string | null): Promise<SupportTicket[]> {
+  const res = await authenticatedApiFetch('/support/my', token, { method: 'GET' });
+  if (!res.ok) throw new Error(`Failed to fetch tickets (${res.status})`);
+  const json = await res.json();
+  return (json?.data || []) as SupportTicket[];
+}
+
 export async function downloadCreditReport(token: string | null): Promise<Blob> {
   const urlBase = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/$/, '');
   if (!token) throw new Error('Authentication token is required');
