@@ -6,13 +6,16 @@ const Redis = require('ioredis');
 const storageService = require('./storageService');
 const File = require('../models/File');
 
-// Initialize Redis client
-const redis = new Redis({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-    // Key prefix for easier identification
-    keyPrefix: 'email_extractor:'
-});
+// Initialize Redis client (prefer REDIS_URL, else host/port/password)
+const redis = process.env.REDIS_URL
+    ? new Redis(process.env.REDIS_URL, { keyPrefix: 'email_extractor:' })
+    : new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: process.env.REDIS_PORT || 6379,
+        password: process.env.REDIS_PASSWORD,
+        // Key prefix for easier identification
+        keyPrefix: 'email_extractor:'
+    });
 
 class EmailsExpiredError extends Error {
     constructor(message) {
