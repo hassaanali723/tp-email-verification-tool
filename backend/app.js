@@ -13,6 +13,11 @@ const supportRoutes = require('./routes/support');
 
 const app = express();
 
+// Basic health check
+app.get('/health', (req, res) => {
+    res.json({ status: 'healthy' });
+});
+
 // Stripe webhook requires raw body. Register it before express.json
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), paymentsRoutes.handleStripeWebhook);
 

@@ -52,8 +52,8 @@ class RedisService {
 
     async _setupRedisConnections() {
         const redisConfig = {
-            host: 'localhost',
-            port: process.env.REDIS_PORT,
+            host: process.env.REDIS_HOST || 'localhost',
+            port: Number(process.env.REDIS_PORT) || 6379,
             password: process.env.REDIS_PASSWORD,
             retryStrategy: times => Math.min(times * 50, 2000),
             maxRetriesPerRequest: null
