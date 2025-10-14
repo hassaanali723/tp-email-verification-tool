@@ -18,13 +18,13 @@ email-verification-tool/
 flowchart LR
   subgraph Frontend [Next.js Frontend]
     UI[Dashboard\nUpload CSV\nResults\nSubscription\nSupport]
-    SSEClient[EventSource (SSE)]
+    SSEClient[EventSource SSE]
   end
 
   subgraph Backend [Node.js Backend API]
-    API[Express API\nAuth (Clerk)\nFile Uploads]
-    Payments[Stripe Integration\nCheckout/Webhooks\nBilling Portal]
-    Credits[Credits Service\nReservation/Consume/Refund]
+    API[Express API\nAuth Clerk\nFile Uploads]
+    Payments[Stripe Integration\nCheckout · Webhooks · Billing Portal]
+    Credits[Credits Service\nReservation · Consume · Refund]
     SSE[Server-Sent Events]
     Mongo[(MongoDB)]
     Redis[(Redis)]
