@@ -40,8 +40,8 @@ flowchart LR
 
   Stripe[Stripe]
 
-  UI -->|HTTP (JWT/Clerk)| API
-  SSEClient <-->|SSE stream| SSE
+  UI -->|HTTP auth via Clerk| API
+  SSEClient <-->|SSE| SSE
 
   API -->|create job| FastAPI
   API <--> Redis
@@ -54,8 +54,8 @@ flowchart LR
   FastAPI -->|enqueue batches| RQ
   Workers -->|publish results| RCache
 
-  RCache -->|pub/sub progress| API
-  API -->|SSE push events| SSEClient
+  RCache -->|pubsub progress| API
+  API -->|SSE events| SSEClient
 ```
 
 ### Key Responsibilities
