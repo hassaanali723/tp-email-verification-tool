@@ -26,7 +26,7 @@ flowchart TB
     BatchUtils -->|queue_batch_for_processing| MQ
     Worker -->|consume batch| MQ
     Worker --> Validator
-    Validator -->|SMTP handshake\n(+ fallback)| SMTP
+    Validator -->|SMTP handshake<br/>+ fallback| SMTP
     Validator --> Circuit
     Validator --> DNSVal
     Worker -->|set progress & publish| Redis
