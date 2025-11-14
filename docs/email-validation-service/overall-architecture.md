@@ -24,7 +24,8 @@ flowchart TB
     Backend -->|POST /api/v1/validate-batch| Routes
     Routes --> BatchUtils
     BatchUtils -->|queue_batch_for_processing| MQ
-    Worker -->|consume batch| MQ
+    MQ -->|deliver batch| Worker
+    Worker -->|acknowledge / subscribe| MQ
     Worker --> Validator
     Validator -->|SMTP handshake<br/>+ fallback| SMTP
     Validator --> Circuit
