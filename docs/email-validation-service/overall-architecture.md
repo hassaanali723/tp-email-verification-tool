@@ -58,6 +58,7 @@ sequenceDiagram
     Routes-->>Backend: BatchValidationResponse | MultiBatchResponse
 
     Rabbit-->>Worker: batch message {batchId, emails, flags}
+    Worker->>Rabbit: ack via message.process()
     Worker->>Circuit: is_open?
     loop per chunk (settings.WORKER_BATCH_SIZE)
         Worker->>Validator: validate_email(email, flags)
