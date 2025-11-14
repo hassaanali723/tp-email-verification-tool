@@ -6,19 +6,19 @@ This file combines the service-wide overview and the in-depth call flow for the 
 
 ```mermaid
 flowchart TB
-    subgraph FastAPI["FastAPI Service (email-validation-service/)"]
+    subgraph FastAPI["FastAPI Service<br/>(email-validation-service/)"]
         direction TB
-        Routes["API Routes\napp/api/routes.py"]
-        BatchUtils["Batch Utilities\nutils/batch_utils.py"]
-        Worker["Background Worker\nworker.py / run_workers.py"]
-        Validator["EmailValidator\nservices/validator.py"]
-        Circuit["CircuitBreaker\nservices/circuit_breaker.py"]
-        DNSVal["DNSValidator\nservices/dns_validator.py"]
+        Routes["API Routes<br/>app/api/routes.py"]
+        BatchUtils["Batch Utilities<br/>utils/batch_utils.py"]
+        Worker["Background Worker<br/>worker.py / run_workers.py"]
+        Validator["EmailValidator<br/>services/validator.py"]
+        Circuit["CircuitBreaker<br/>services/circuit_breaker.py"]
+        DNSVal["DNSValidator<br/>services/dns_validator.py"]
     end
 
-    Backend["Node.js Backend\n(consumer of this service)"]
-    MQ["RabbitMQ\nemail_validation queue"]
-    Redis["Redis\nprogress + pub/sub + circuit state"]
+    Backend["Node.js Backend<br/>(consumer of this service)"]
+    MQ["RabbitMQ<br/>email_validation queue"]
+    Redis["Redis<br/>progress + pub/sub + circuit state"]
     SMTP["Mail Servers / DNS"]
 
     Backend -->|POST /api/v1/validate-batch| Routes
