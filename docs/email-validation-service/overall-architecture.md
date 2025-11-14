@@ -57,6 +57,7 @@ sequenceDiagram
     end
     Routes-->>Backend: BatchValidationResponse | MultiBatchResponse
 
+    Worker->>Rabbit: fetch message (queue iterator)
     Rabbit-->>Worker: batch message {batchId, emails, flags}
     Worker->>Rabbit: ack via message.process()
     Worker->>Circuit: is_open?
