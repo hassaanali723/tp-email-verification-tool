@@ -1,10 +1,11 @@
-import { apiFetch, authenticatedApiFetch } from '@/lib/api';
+import { authenticatedApiFetch } from '@/lib/api';
 
 export async function fetchFiles(page: number, token?: string | null, limit?: number) {
+  if (!token) {
+    throw new Error('Authentication required');
+  }
   const endpoint = `/files/?page=${page}${limit ? `&limit=${encodeURIComponent(String(limit))}` : ''}`;
-  const response = token
-    ? await authenticatedApiFetch(endpoint, token)
-    : await apiFetch(endpoint);
+  const response = await authenticatedApiFetch(endpoint, token);
   return response.json();
 }
 
