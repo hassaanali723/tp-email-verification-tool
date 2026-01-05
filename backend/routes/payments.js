@@ -7,6 +7,7 @@ const UserCredits = require('../models/UserCredits');
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 const stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' });
+const StripeWebhookEvent = require('../models/StripeWebhookEvent');
 
 // Match frontend pricing exactly (USD per credit). Highest threshold <= credits wins.
 // Keep these numbers in sync with frontend/src/constants/pricing.ts
@@ -109,7 +110,6 @@ router.get('/config', requireAuth, (req, res) => {
   });
 });
 
-// Webhook handler must be registered with express.raw in app.js
 async function handleStripeWebhook(req, res) {
   const signature = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
@@ -122,7 +122,46 @@ async function handleStripeWebhook(req, res) {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  const eventId = event?.id;
+  logger.info('Stripe webhook received', { eventId, type: event?.type });
+
   try {
+    const existing = await StripeWebhookEvent.findOne({ eventId }).lean();
+    if (existing && existing.status === 'processed') {
+      logger.info('Stripe webhook already processed; skipping re-run', { eventId, type: event.type });
+      return res.json({ received: true, duplicate: true });
+    }
+
+    // Persist the event for durability and idempotency
+    const stored = await StripeWebhookEvent.findOneAndUpdate(
+      { eventId },
+      {
+        $setOnInsert: { status: 'queued', attempts: 0 },
+        $set: { lastReceivedAt: new Date(), type: event.type, payload: event },
+      },
+      { new: true, upsert: true }
+    ).lean();
+
+    // Process asynchronously; respond 200 immediately so Stripe doesn't retry for transient issues
+    processStripeEvent(event, stored?.attempts || 0).catch((err) => {
+      logger.error('Stripe webhook processing failed', { eventId, type: event.type, error: err.message });
+    });
+
+    return res.json({ received: true, queued: true });
+  } catch (err) {
+    logger.error('Error enqueueing Stripe webhook event', { eventId, type: event?.type, error: err.message });
+    return res.status(500).send('Webhook handler error');
+  }
+}
+
+async function processStripeEvent(event, priorAttempts = 0) {
+  const eventId = event?.id;
+  try {
+    await StripeWebhookEvent.updateOne(
+      { eventId },
+      { $set: { status: 'processing', lastError: null }, $inc: { attempts: 1 } }
+    );
+
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;
@@ -132,6 +171,7 @@ async function handleStripeWebhook(req, res) {
 
         if (!userId || !credits) {
           logger.warn('Stripe webhook missing metadata or payment intent; skipping credit grant', {
+            eventId,
             userId,
             credits,
             paymentIntentId,
@@ -161,6 +201,7 @@ async function handleStripeWebhook(req, res) {
           // Do NOT grant credits here to avoid double-grant with the first invoice.
           // Credits will be granted on invoice.payment_succeeded for each billing period.
           logger.info('Checkout completed for subscription; recorded linkage; credits on invoice', {
+            eventId,
             userId,
             subscriptionId: session.subscription,
             customer: session.customer,
@@ -181,6 +222,7 @@ async function handleStripeWebhook(req, res) {
               mode: session.mode,
             }
           );
+          logger.info('Credits granted for checkout.session.completed', { eventId, userId, credits, reference });
         }
         break;
       }
@@ -198,7 +240,7 @@ async function handleStripeWebhook(req, res) {
           }
         }
         if (!subscriptionId) {
-          logger.warn('Invoice missing subscription after fallbacks; skipping', { invoiceId: invoice.id, customer: invoice.customer });
+          logger.warn('Invoice missing subscription after fallbacks; skipping', { eventId, invoiceId: invoice.id, customer: invoice.customer });
           break;
         }
 
@@ -207,7 +249,7 @@ async function handleStripeWebhook(req, res) {
         try {
           subscription = await stripe.subscriptions.retrieve(subscriptionId);
         } catch (e) {
-          logger.error('Failed to retrieve subscription for invoice', { error: e.message, subscriptionId, invoiceId: invoice.id });
+          logger.error('Failed to retrieve subscription for invoice', { eventId, error: e.message, subscriptionId, invoiceId: invoice.id });
           break;
         }
 
@@ -232,7 +274,7 @@ async function handleStripeWebhook(req, res) {
           }
         }
         if (!userId || !credits) {
-          logger.warn('Missing userId or credits on invoice metadata; skipping grant', { subscriptionId, invoiceId: invoice.id, userId, credits });
+          logger.warn('Missing userId or credits on invoice metadata; skipping grant', { eventId, subscriptionId, invoiceId: invoice.id, userId, credits });
           break;
         }
 
@@ -266,18 +308,26 @@ async function handleStripeWebhook(req, res) {
         } catch (e) {
           // ignore linkage failure
         }
+        logger.info('Credits granted for invoice.payment_succeeded', { eventId, userId, credits, reference });
         break;
       }
       default:
         // No-op for other events for now
+        logger.info('Stripe webhook ignored event type', { eventId, type: event.type });
         break;
     }
-  } catch (err) {
-    logger.error('Error handling Stripe webhook event', { error: err });
-    return res.status(500).send('Webhook handler error');
-  }
 
-  return res.json({ received: true });
+    await StripeWebhookEvent.updateOne(
+      { eventId },
+      { $set: { status: 'processed', processedAt: new Date(), lastError: null } }
+    );
+  } catch (err) {
+    await StripeWebhookEvent.updateOne(
+      { eventId },
+      { $set: { status: 'failed', lastError: err.message } }
+    );
+    throw err;
+  }
 }
 
 module.exports = { router, handleStripeWebhook };

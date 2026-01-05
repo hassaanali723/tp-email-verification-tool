@@ -64,7 +64,8 @@ function subscribeToSSE(
   fileId: string, 
   onUpdate: (data: any) => void, 
   getTokenFn: () => Promise<string | null>,
-  onError: (error: Error) => void
+  onError: (error: Error) => void,
+  onClose?: () => void
 ) {
   console.log('Setting up SSE connection for validation results:', fileId);
   const eventSource = new EventSource(`${API_BASE_URL.replace(/\/$/, '')}/events/${fileId}`);
@@ -128,6 +129,7 @@ function subscribeToSSE(
       )) {
         console.log('Authentication error, closing SSE connection');
         eventSource.close();
+        onClose?.();
       }
     }
   });
@@ -135,6 +137,7 @@ function subscribeToSSE(
   eventSource.onerror = (error) => {
     console.error('SSE connection error:', error);
     onError(new Error('SSE connection error'));
+    onClose?.();
   };
 
   return eventSource;
@@ -248,6 +251,9 @@ export const useValidationResultsStore = create<ValidationResultsState & { sseCo
           loadingStats: false,
           loadingEmails: false
         });
+      },
+      () => {
+        get().unsubscribeFromUpdates();
       }
     );
 
