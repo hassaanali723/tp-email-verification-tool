@@ -82,15 +82,16 @@ class FileProcessingService {
             // Extract emails based on file type
             const { emails, processedRows } = await this._extractEmails(fileData, fileId);
 
-            // Store emails in Redis with 1-hour expiration
+            // Store emails in Redis with 1-week expiration (so users can validate later)
             const redisKey = `emails:${userId}:${fileId}`;
             const pipeline = redis.pipeline();
+            const ONE_WEEK_SECONDS = 7 * 24 * 60 * 60; // 604800 seconds
             
             // Store each email in a Redis list
             if (emails.length > 0) {
                 pipeline.del(redisKey); // Clear any existing data
                 pipeline.rpush(redisKey, emails);
-                pipeline.expire(redisKey, 3600); // Expire after 1 hour
+                pipeline.expire(redisKey, ONE_WEEK_SECONDS); // Expire after 1 week
                 await pipeline.exec();
             }
 
