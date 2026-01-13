@@ -310,7 +310,8 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to start verification';
-      console.error('Start verification error:', message);
+      // Use warn instead of error to avoid Next.js dev overlay for handled/expected errors
+      console.warn('Start verification error:', message);
       toast.error(message);
       set({ error: message });
     }

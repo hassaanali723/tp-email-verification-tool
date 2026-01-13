@@ -22,7 +22,8 @@ app.get('/health', (req, res) => {
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), paymentsRoutes.handleStripeWebhook);
 
 // Middleware
-app.use(express.json());
+// Increase JSON body size limit to handle large email validation batches
+app.use(express.json({ limit: '10mb' }));
 
 // Enable CORS for all origins
 app.use(cors());
