@@ -140,33 +140,25 @@ async function handleValidationUpdate(
   onUpdate: (stats: any) => void,
   eventSource: EventSource
 ) {
-  const token = await getToken();
-  if (!token) {
-    console.error('No token available for stats update');
+  // Use stats directly from SSE event data (backend sends { fileId, stats })
+  // This avoids unnecessary API calls and ensures real-time updates
+  const statsData = data.stats || data;
+  
+  if (!statsData) {
+    console.warn('No stats data in SSE event:', data);
     return;
   }
 
-  try {
-    const stats = await fetchValidationStats(fileId, token);
-    console.log('Fetched updated stats:', stats);
+  console.log('Processing stats data from SSE:', statsData);
+  
+  // Update the UI immediately with stats from SSE event
+  onUpdate(statsData);
 
-    if (stats.success === false) {
-      console.error('Error fetching stats:', stats);
-      return;
-    }
-
-    const statsData = stats.data || stats;
-    console.log('Processing stats data:', statsData);
-    onUpdate(statsData);
-
-    if (statsData.status === 'completed') {
-      console.log('Validation completed, closing SSE connection');
-      eventSource.close();
-      // Trigger a navbar refresh of credit balance after consumption
-      try { emitCreditBalanceRefresh(); } catch {}
-    }
-  } catch (err) {
-    console.error('Error fetching validation stats:', err);
+  if (statsData.status === 'completed') {
+    console.log('Validation completed, closing SSE connection');
+    eventSource.close();
+    // Trigger a navbar refresh of credit balance after consumption
+    try { emitCreditBalanceRefresh(); } catch {}
   }
 }
 
@@ -328,19 +320,29 @@ export const useFileStore = create<FileStore & { sseConnections: Record<string, 
   },
 
   updateFileStats: (fileId: string, stats: any) => {
-    console.log('Updating file stats:', { fileId, stats });
-    set(state => ({
-      files: state.files.map(file =>
-        file.id === fileId
-          ? {
-              ...file,
-              stats: stats.stats || file.stats,
-              progress: stats.progress || file.progress,
-              status: stats.status || file.status
-            }
-          : file
-      )
-    }));
+    console.log('Updating file stats:', { fileId, stats, progress: stats?.progress, status: stats?.status });
+    set(state => {
+      const updatedFiles = state.files.map(file => {
+        if (file.id === fileId) {
+          const updated = {
+            ...file,
+            stats: stats.stats || file.stats,
+            progress: stats.progress || file.progress,
+            status: stats.status || file.status
+          };
+          console.log('Updated file:', { 
+            fileId, 
+            oldProgress: file.progress, 
+            newProgress: updated.progress,
+            oldStatus: file.status,
+            newStatus: updated.status
+          });
+          return updated;
+        }
+        return file;
+      });
+      return { files: updatedFiles };
+    });
   },
 
   uploadSuccess: async (token?: string | null) => {
