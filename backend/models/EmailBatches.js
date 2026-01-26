@@ -59,6 +59,11 @@ const emailBatchesSchema = new mongoose.Schema({
         default: true
     },
     batches: [batchStatusSchema],
+    version: {
+        type: Number,
+        default: 0,
+        required: true
+    },
     lastUpdated: {
         type: Date,
         default: Date.now

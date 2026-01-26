@@ -117,52 +117,93 @@ class RedisService {
                 totalEmails: data.totalEmails
             });
 
-            // First update EmailResults
+            // Get fileId and userId BEFORE updating (needed for credit deduction)
+            const emailResult = await EmailResults.findOne({ batchId: data.batchId }, { fileId: 1, userId: 1, processedEmails: 1 });
+            if (!emailResult || !emailResult.fileId) {
+                logger.error('EmailResult not found for batch:', { batchId: data.batchId });
+                return;
+            }
+
+            const fileId = emailResult.fileId;
+            const userId = emailResult.userId;
+            
+            // Update EmailResults FIRST (so we have the latest processedEmails for credit calculation)
             await this._updateEmailResults(data);
-
-            // Get fileId and userId from EmailResults to compute stats and stream consumption
-            const emailResult = await EmailResults.findOne({ batchId: data.batchId }, { fileId: 1, userId: 1 });
-            if (emailResult && emailResult.fileId) {
-                const fileId = emailResult.fileId;
-                const userId = emailResult.userId;
-
-                // Get fresh stats after results update
-                const stats = await statisticsService.getFileStats(fileId, userId);
-
-                // Incremental credit consumption BEFORE updating batches/completion and before notifying clients
-                try {
-                    const processed = Number(stats?.progress?.processed || 0);
-                    const consumedKey = `consumed:${userId}:${fileId}`;
-                    const lastConsumed = Number(await this.publisher.get(consumedKey)) || 0;
-                    const delta = Math.max(0, processed - lastConsumed);
-                    if (delta > 0) {
-                        const transactionRef = `progress:${fileId}:${processed}`;
+            
+            // Read the UPDATED processedEmails count to calculate delta correctly (prevents race conditions)
+            const updatedEmailResult = await EmailResults.findOne({ batchId: data.batchId }, { processedEmails: 1 });
+            const currentBatchCount = updatedEmailResult?.processedEmails || 0;
+            const previousBatchCount = emailResult.processedEmails || 0;
+            
+            // Deduct credits ONLY when batch is complete (prevents over-deduction from intermediate updates)
+            try {
+                if (data.isComplete) {
+                    const batchEmails = data.processedCount;
+                    const transactionRef = `batch:${data.batchId}:complete:${batchEmails}`;
+                    
+                    // Check if this batch's credits were already deducted (idempotency)
+                    const alreadyDeducted = await creditService.transactionExists(userId, transactionRef);
+                    if (alreadyDeducted) {
+                        logger.info('Credits already deducted for completed batch (idempotent skip):', {
+                            batchId: data.batchId,
+                            transactionRef
+                        });
+                    } else {
+                        // Deduct credits for the ENTIRE batch when it completes
                         await creditService.deductCredits(
                             userId,
-                            delta,
+                            batchEmails,
                             transactionRef,
-                            `Progress credits for file ${fileId} (+${delta})`,
-                            { fileId, type: 'validation_progress', processed }
+                            `Batch validation completed for file ${fileId} (${batchEmails} emails)`,
+                            { fileId, batchId: data.batchId, type: 'validation_batch_complete', processed: batchEmails }
                         );
-                        await this.publisher.set(consumedKey, String(processed));
+                        logger.info('Credits deducted for completed batch:', {
+                            batchId: data.batchId,
+                            batchEmails,
+                            transactionRef
+                        });
                     }
-                } catch (incErr) {
-                    logger.error('Incremental credit consumption error:', {
+                } else {
+                    logger.debug('Batch not complete yet, skipping credit deduction:', {
                         batchId: data.batchId,
-                        error: incErr.message
+                        processedCount: data.processedCount,
+                        isComplete: data.isComplete
                     });
                 }
+            } catch (incErr) {
+                logger.error('Credit deduction error:', {
+                    batchId: data.batchId,
+                    error: incErr.message
+                });
+            }
+
+            // Update EmailBatches FIRST (this updates progress and status)
+            await this._updateEmailBatches(data);
+
+            // Publish stats IMMEDIATELY after update for real-time progress updates
+            // This ensures frontend gets updates even if batch isn't complete yet
+            try {
+                // Get fresh stats AFTER EmailBatches update (so progress/status are correct)
+                const stats = await statisticsService.getFileStats(fileId, userId);
 
                 // Publish stats and first-page emails for live UI update
                 await this.publisher.publish(`file_stats:${fileId}`, JSON.stringify(stats));
                 const emailList = await statisticsService.getEmailList(fileId, userId);
                 await this.publisher.publish(`file_emails:${fileId}`, JSON.stringify(emailList));
                 sendSseEvent(fileId, 'validationUpdate', { fileId, stats });
-                logger.info(`Published stats and email list for fileId: ${fileId}`);
+                
+                logger.info(`Published stats and email list for fileId: ${fileId}`, {
+                    status: stats.status,
+                    progress: stats.progress,
+                    batchId: data.batchId
+                });
+            } catch (pubErr) {
+                logger.error('Failed to publish stats:', {
+                    fileId,
+                    batchId: data.batchId,
+                    error: pubErr.message
+                });
             }
-
-            // Finally, update EmailBatches which may trigger completion handling
-            await this._updateEmailBatches(data);
             
         } catch (error) {
             logger.error('Batch update processing failed:', { 
@@ -255,72 +296,221 @@ class RedisService {
     }
 
     async _updateEmailBatches(data) {
-        try {
-            // Prefer mapping if available, but fall back to direct lookup by batchId
-            const requestId = await this.publisher.get(`batch_parent:${data.batchId}`).catch(() => null);
+        const MAX_RETRIES = 5;
+        let attempts = 0;
 
-            let emailBatches = null;
-            if (requestId) {
-                emailBatches = await EmailBatches.findOne({ requestId }).exec();
-            }
-            if (!emailBatches) {
-                emailBatches = await EmailBatches.findOne({ batchIds: data.batchId }).exec();
-            }
-            if (!emailBatches) {
-                logger.error('EmailBatches document not found:', { requestId, batchId: data.batchId });
-                return;
-            }
+        while (attempts < MAX_RETRIES) {
+            try {
+                // Find EmailBatches document
+                const requestId = await this.publisher.get(`batch_parent:${data.batchId}`).catch(() => null);
+                let emailBatches = null;
+                
+                if (requestId) {
+                    emailBatches = await EmailBatches.findOne({ requestId }).lean();
+                }
+                if (!emailBatches) {
+                    emailBatches = await EmailBatches.findOne({ batchIds: data.batchId }).lean();
+                }
+                if (!emailBatches) {
+                    logger.error('EmailBatches document not found:', { requestId, batchId: data.batchId });
+                    return;
+                }
 
-            const batchIndex = emailBatches.batches.findIndex(b => b.batchId === data.batchId);
-            if (batchIndex === -1) {
-                logger.error('Batch not found in EmailBatches document:', { 
-                    requestId, 
+                // Calculate delta for atomic increment
+                const batchIndex = emailBatches.batches.findIndex(b => b.batchId === data.batchId);
+                if (batchIndex === -1) {
+                    logger.error('Batch not found in EmailBatches document:', { 
+                        requestId, 
+                        batchId: data.batchId,
+                        availableBatches: emailBatches.batches.map(b => b.batchId)
+                    });
+                    return;
+                }
+
+                // Atomic update with optimistic locking
+                // First, update the specific batch in array
+                const updateResult = await EmailBatches.findOneAndUpdate(
+                    { 
+                        _id: emailBatches._id,
+                        version: emailBatches.version  // Optimistic locking
+                    },
+                    {
+                        $set: {
+                            [`batches.$[batch].status`]: data.isComplete ? "completed" : "processing",
+                            [`batches.$[batch].processedEmails`]: data.processedCount,
+                            [`batches.$[batch].totalEmails`]: data.totalEmails,
+                            lastUpdated: new Date()
+                        },
+                        $inc: { version: 1 }
+                    },
+                    {
+                        arrayFilters: [{ "batch.batchId": data.batchId }],
+                        new: true
+                    }
+                );
+
+                if (!updateResult) {
+                    // Version conflict - retry
+                    attempts++;
+                    if (attempts >= MAX_RETRIES) {
+                        logger.error('EmailBatches update failed after max retries', {
+                            batchId: data.batchId,
+                            fileId: emailBatches.fileId,
+                            version: emailBatches.version
+                        });
+                        break;
+                    }
+                    const delay = Math.pow(2, attempts) * 50;
+                    logger.warn(`Version conflict for EmailBatches update. Retrying in ${delay}ms (attempt ${attempts}/${MAX_RETRIES})`, {
+                        batchId: data.batchId,
+                        fileId: emailBatches.fileId,
+                        currentVersion: emailBatches.version
+                    });
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+
+                // Recalculate progress and status from updated batches (read fresh from database)
+                const updatedBatches = updateResult.batches;
+                const totalProcessed = updatedBatches.reduce((sum, b) => sum + (b.processedEmails || 0), 0);
+                const allComplete = updatedBatches.every(b => b.status === "completed");
+                const hasFailed = updatedBatches.some(b => b.status === "failed");
+                const overallStatus = hasFailed ? "failed" : (allComplete ? "completed" : "processing");
+                const progress = `${totalProcessed}/${updateResult.totalEmails}`;
+
+                // Atomic update of calculated fields
+                const finalResult = await EmailBatches.findOneAndUpdate(
+                    { _id: updateResult._id, version: updateResult.version },
+                    {
+                        $set: {
+                            processedEmails: totalProcessed,
+                            status: overallStatus,
+                            progress: progress,
+                            lastUpdated: new Date()
+                        },
+                        $inc: { version: 1 }
+                    },
+                    { new: true }
+                );
+
+                if (!finalResult) {
+                    // Version conflict on second update - retry entire operation
+                    attempts++;
+                    if (attempts >= MAX_RETRIES) {
+                        logger.error('EmailBatches final update failed after max retries', {
+                            batchId: data.batchId,
+                            fileId: updateResult.fileId
+                        });
+                        break;
+                    }
+                    const delay = Math.pow(2, attempts) * 50;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+
+                // Log successful update for debugging
+                logger.info('EmailBatches updated successfully:', {
                     batchId: data.batchId,
-                    availableBatches: emailBatches.batches.map(b => b.batchId)
+                    fileId: finalResult.fileId,
+                    processedEmails: finalResult.processedEmails,
+                    totalEmails: finalResult.totalEmails,
+                    progress: finalResult.progress,
+                    status: finalResult.status,
+                    version: finalResult.version,
+                    allComplete: allComplete,
+                    hasFailed: hasFailed,
+                    batchesStatus: updatedBatches.map(b => ({ batchId: b.batchId, status: b.status }))
                 });
-                return;
+
+                // Check if we should trigger completion handler
+                const wasNotComplete = emailBatches.status !== "completed";
+                const isNowComplete = finalResult.status === "completed";
+
+                // Handle completion - if all batches are complete
+                if (allComplete && wasNotComplete) {
+                    // ALWAYS force status to "completed" when all batches are complete (ensures it persists)
+                    let completedResult = finalResult;
+                    if (!isNowComplete || finalResult.status !== "completed") {
+                        logger.warn('All batches complete but status not "completed", forcing update:', {
+                            fileId: finalResult.fileId,
+                            currentStatus: finalResult.status,
+                            allComplete: allComplete,
+                            isNowComplete: isNowComplete
+                        });
+                        
+                        // Use findOneAndUpdate with version check to ensure atomic update
+                        const forcedUpdate = await EmailBatches.findOneAndUpdate(
+                            { _id: finalResult._id, version: finalResult.version },
+                            {
+                                $set: { status: "completed", lastUpdated: new Date() },
+                                $inc: { version: 1 }
+                            },
+                            { new: true }
+                        );
+                        
+                        if (forcedUpdate) {
+                            completedResult = forcedUpdate;
+                            logger.info('Status forced to "completed":', {
+                                fileId: finalResult.fileId,
+                                previousStatus: finalResult.status,
+                                newStatus: completedResult.status,
+                                version: completedResult.version
+                            });
+                            // Small delay to ensure the update is fully persisted before stats fetch
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                        } else {
+                            // Version conflict - retry by fetching fresh
+                            logger.warn('Version conflict during forced status update, fetching fresh:', {
+                                fileId: finalResult.fileId
+                            });
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                            const freshResult = await EmailBatches.findById(finalResult._id);
+                            if (freshResult && freshResult.status === "completed") {
+                                completedResult = freshResult;
+                                logger.info('Status already "completed" (from fresh fetch):', { fileId: finalResult.fileId });
+                            }
+                        }
+                    }
+                    
+                    logger.info('All batches complete, calling completion handler:', {
+                        fileId: completedResult.fileId,
+                        batchesCount: updatedBatches.length,
+                        previousStatus: emailBatches.status,
+                        newStatus: completedResult.status
+                    });
+                    await this._handleValidationComplete(completedResult);
+                } else if (hasFailed && finalResult.status === "failed" && emailBatches.status !== "failed") {
+                    logger.info('Validation failed, calling failure handler:', {
+                        fileId: finalResult.fileId
+                    });
+                    await this._handleValidationFailed(finalResult);
+                }
+
+                return; // Success
+
+            } catch (error) {
+                if (error.message.includes('Write conflict') || error.message.includes('version') || error.code === 112) {
+                    attempts++;
+                    const delay = Math.pow(2, attempts) * 50;
+                    logger.warn(`Write conflict for EmailBatches update. Retrying in ${delay}ms (attempt ${attempts}/${MAX_RETRIES})`, {
+                        batchId: data.batchId,
+                        error: error.message
+                    });
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                
+                logger.error('Failed to update EmailBatches:', {
+                    batchId: data.batchId,
+                    requestId: await this.publisher.get(`batch_parent:${data.batchId}`).catch(() => null),
+                    error: error.message,
+                    stack: error.stack
+                });
+                throw error;
             }
-
-            emailBatches.batches[batchIndex] = {
-                batchId: data.batchId,
-                status: data.isComplete ? "completed" : "processing",
-                processedEmails: data.processedCount,
-                totalEmails: data.totalEmails
-            };
-
-            const { totalProcessed, totalEmails } = this._calculateProgress(emailBatches.batches);
-            const allComplete = emailBatches.batches.every(batch => batch.status === "completed");
-            const wasNotComplete = emailBatches.status !== "completed";
-
-            // Check if any batch failed
-            const hasFailed = emailBatches.batches.some(batch => batch.status === "failed");
-            const overallStatus = hasFailed ? "failed" : (allComplete ? "completed" : "processing");
-
-            Object.assign(emailBatches, {
-                processedEmails: totalProcessed,
-                totalEmails,
-                status: overallStatus,
-                progress: `${totalProcessed}/${totalEmails}`,
-                lastUpdated: new Date()
-            });
-
-            await emailBatches.save();
-
-            // Handle credit operations based on status change
-            if (allComplete && wasNotComplete) {
-                await this._handleValidationComplete(emailBatches);
-            } else if (hasFailed && emailBatches.status !== "failed") {
-                await this._handleValidationFailed(emailBatches);
-            }
-        } catch (error) {
-            logger.error('Failed to update EmailBatches:', {
-                batchId: data.batchId,
-                requestId: await this.publisher.get(`batch_parent:${data.batchId}`).catch(() => null),
-                error: error.message,
-                stack: error.stack
-            });
-            throw error;
         }
+
+        throw new Error(`Failed to update EmailBatches after ${MAX_RETRIES} attempts due to write conflicts`);
     }
 
     _calculateProgress(batches) {
@@ -338,42 +528,23 @@ class RedisService {
         try {
             const { fileId, userId, totalEmails } = emailBatches;
             
-            logger.info('Validation completed, converting reserved credits to consumption:', {
+            // Credits are now deducted when each batch completes (not here)
+            // This handler is only for cleanup and logging
+            logger.info('Validation completion handler called (credits already deducted per batch):', {
                 fileId,
                 userId,
                 totalEmails
             });
 
-            // Determine how many credits remain unconsumed using authoritative history
-            const consumedKey = `consumed:${userId}:${fileId}`;
-            const consumedRedis = Number(await this.publisher.get(consumedKey)) || 0;
-            const consumedActual = await creditService.getConsumedForFile(userId, fileId);
-            const consumedSoFar = Math.max(consumedRedis, consumedActual);
-            const remaining = Math.max(0, Number(totalEmails || 0) - consumedSoFar);
-
-            // Always attempt to release any reservation; we'll directly deduct remaining if needed
+            // Always attempt to release any reservation
             try {
                 const reservationPattern = `validation_${fileId}_*`;
-                await creditService.releaseReservedCredits(userId, reservationPattern, 'Release after streaming consumption');
+                await creditService.releaseReservedCredits(userId, reservationPattern, 'Release after validation completion');
             } catch (e) {
                 logger.warn('Releasing reservation failed (may not exist):', { fileId, error: e.message });
             }
 
-            if (remaining > 0) {
-                const transactionRef = `completed_remaining_${fileId}_${Date.now()}`;
-                try {
-                    await creditService.deductCredits(
-                        userId,
-                        remaining,
-                        transactionRef,
-                        `Completion credits for file ${fileId} (+${remaining})`,
-                        { fileId, type: 'validation_completion_remaining' }
-                    );
-                    await this.publisher.set(consumedKey, String(consumedSoFar + remaining));
-                } catch (finalErr) {
-                    logger.error('Final credit deduction failed:', { fileId, remaining, error: finalErr.message });
-                }
-            }
+            // No additional credit deduction needed - credits are deducted when each batch completes
 
         } catch (error) {
             logger.error('Error handling validation completion:', {
