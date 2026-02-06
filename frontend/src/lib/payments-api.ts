@@ -7,6 +7,10 @@ export interface PaymentsConfig {
   currency: string;
 }
 
+// Simple in-flight cache so multiple components calling fetchCreditBalance
+// at the same time (e.g. navbar + dashboard) only trigger a single request.
+let creditBalanceInFlight: Promise<number> | null = null;
+
 export async function getPaymentsConfig(token: string | null): Promise<PaymentsConfig> {
   // Base URL is expected to include /api, so endpoints here should not
   const res = await authenticatedApiFetch('/payments/config', token, { method: 'GET' });
@@ -146,10 +150,28 @@ export interface CreditBalanceResponse {
 }
 
 export async function fetchCreditBalance(token: string | null): Promise<number> {
-  const res = await authenticatedApiFetch('/credits/balance', token, { method: 'GET' });
-  if (!res.ok) throw new Error(`Failed to fetch credit balance (${res.status})`);
-  const json = (await res.json()) as CreditBalanceResponse;
-  return json?.data?.balance ?? 0;
+  if (!token) {
+    throw new Error('Authentication token is required');
+  }
+
+  // If a request is already in-flight, reuse it so that multiple
+  // components mounting at once do not hammer the backend or cause
+  // concurrent initialization races for new-user trial credits.
+  if (!creditBalanceInFlight) {
+    creditBalanceInFlight = (async () => {
+      const res = await authenticatedApiFetch('/credits/balance', token, { method: 'GET' });
+      if (!res.ok) throw new Error(`Failed to fetch credit balance (${res.status})`);
+      const json = (await res.json()) as CreditBalanceResponse;
+      return json?.data?.balance ?? 0;
+    })();
+  }
+
+  try {
+    return await creditBalanceInFlight;
+  } finally {
+    // Allow future calls to trigger a fresh request if needed.
+    creditBalanceInFlight = null;
+  }
 }
 
 export interface CreditTransaction {
