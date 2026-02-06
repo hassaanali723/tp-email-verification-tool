@@ -151,7 +151,7 @@ export default function ValidatePage() {
                   </p>
                 </div>
                 <div className="text-xs text-gray-400">
-                  Maximum file size: 10MB • Format: CSV, XLSX
+                  Maximum file size: 100MB • Format: CSV, XLSX
                 </div>
               </div>
             </div>
@@ -210,7 +210,7 @@ export default function ValidatePage() {
               </li>
               <li className="flex items-center text-xs text-gray-600">
                 <div className="w-1.5 h-1.5 bg-[#295c51] rounded-full mr-2" />
-                Each email will be validated for syntax, domain, and mailbox existence
+                Each email will be validated for syntax, domain records, SMTP response, disposable checks, and mailbox existence
               </li>
               <li className="flex items-center text-xs text-gray-600">
                 <div className="w-1.5 h-1.5 bg-[#295c51] rounded-full mr-2" />
