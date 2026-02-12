@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@clerk/nextjs';
 import { createCheckoutSession } from '@/lib/payments-api';
+import { CryptoPaymentModal } from '@/components/payments/CryptoPaymentModal';
 
 export default function PricingPage() {
 	const { getToken } = useAuth();
@@ -14,6 +15,7 @@ export default function PricingPage() {
 	const [selectedCredits, setSelectedCredits] = useState<number>(PRICING_TIERS[0]?.credits ?? 2000);
 	const [customInput, setCustomInput] = useState<string>(String(PRICING_TIERS[0]?.credits ?? 2000));
 	const [isLoading, setIsLoading] = useState(false);
+	const [showCryptoModal, setShowCryptoModal] = useState(false);
 
 	useEffect(() => {
 		setCustomInput(String(selectedCredits));
@@ -116,17 +118,46 @@ export default function PricingPage() {
 							<div className="flex justify-between font-semibold mt-2"><span>Total</span><span>${total.toFixed(2)}</span></div>
 						</div>
 					</div>
-					<div className="mt-6">
+					<div className="mt-6 space-y-3">
 						<Button
 							onClick={handleCheckout}
 							disabled={isLoading}
 							className="w-full bg-[#295c51] hover:bg-[#1e453c]"
 						>
-							{isLoading ? 'Creating checkout...' : 'Next'}
+							{isLoading ? 'Creating checkout...' : 'Pay with Card'}
+						</Button>
+						
+						<div className="relative">
+							<div className="absolute inset-0 flex items-center">
+								<span className="w-full border-t" />
+							</div>
+							<div className="relative flex justify-center text-xs uppercase">
+								<span className="bg-white px-2 text-gray-500">Or</span>
+							</div>
+						</div>
+						
+						<Button
+							onClick={() => setShowCryptoModal(true)}
+							variant="outline"
+							className="w-full border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700"
+						>
+							<div className="flex items-center space-x-2">
+								<div className="w-4 h-4 bg-gradient-to-r from-orange-500 to-yellow-500 rounded text-white flex items-center justify-center text-xs font-bold">
+									₿
+								</div>
+								<span>Pay with Crypto</span>
+							</div>
 						</Button>
 					</div>
 				</Card>
 			</div>
+			
+			<CryptoPaymentModal
+				isOpen={showCryptoModal}
+				onClose={() => setShowCryptoModal(false)}
+				credits={selectedCredits}
+				usdAmount={total}
+			/>
 		</div>
 	);
 }
