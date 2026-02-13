@@ -2,8 +2,10 @@ const express = require('express');
 const Stripe = require('stripe');
 const { requireAuth } = require('../middleware/auth');
 const creditService = require('../services/creditService');
+const cryptoService = require('../services/cryptoService');
 const logger = require('../utils/logger');
 const UserCredits = require('../models/UserCredits');
+const CryptoWebhookEvent = require('../models/CryptoWebhookEvent');
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
 const stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' });
@@ -327,6 +329,338 @@ async function processStripeEvent(event, priorAttempts = 0) {
       { $set: { status: 'failed', lastError: err.message } }
     );
     throw err;
+  }
+}
+
+//===========================================
+// CRYPTO PAYMENT ROUTES (NOWPayments)
+//===========================================
+
+// GET /crypto/currencies - Get available cryptocurrencies
+router.get('/crypto/currencies', requireAuth, async (req, res) => {
+  try {
+    const currencies = await cryptoService.getAvailableCurrencies();
+    
+    // Filter to popular cryptocurrencies for better UX
+    const popularCurrencies = currencies.filter(currency => 
+      ['btc', 'eth', 'usdt', 'usdc', 'bnb', 'ada', 'ltc', 'sol'].includes(currency.toLowerCase())
+    );
+    
+    res.json({ 
+      success: true, 
+      data: {
+        popular: popularCurrencies,
+        all: currencies
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching crypto currencies:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch available currencies' });
+  }
+});
+
+// GET /crypto/estimate - Get price estimate for crypto payment
+router.get('/crypto/estimate', requireAuth, async (req, res) => {
+  try {
+    const { credits, currency = 'usdt' } = req.query;
+    
+    if (!credits || credits < 100) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Credits must be at least 100' 
+      });
+    }
+
+    // Calculate USD amount using same pricing tiers as Stripe
+    const creditsNum = parseInt(credits, 10);
+    const pricePerCredit = getPricePerCreditUSD(creditsNum, 'payment');
+    const usdAmount = Math.round((creditsNum * pricePerCredit) * 100) / 100; // Round to 2 decimals
+
+    const estimate = await cryptoService.getEstimatedPrice(usdAmount, currency);
+    const minAmount = await cryptoService.getMinimumAmount(currency);
+
+    res.json({ 
+      success: true, 
+      data: {
+        credits: creditsNum,
+        usdAmount: usdAmount,
+        cryptoAmount: estimate.estimatedAmount,
+        currency: estimate.currency,
+        minAmount: minAmount.minAmount,
+        pricePerCredit: pricePerCredit
+      }
+    });
+  } catch (error) {
+    logger.error('Error getting crypto price estimate:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to get price estimate' });
+  }
+});
+
+// POST /crypto/create-payment - Create crypto payment invoice
+router.post('/crypto/create-payment', requireAuth, async (req, res) => {
+  try {
+    const userId = req.auth.userId;
+    const { credits, currency = 'usdt' } = req.body;
+
+    if (!credits || credits < 100) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Credits must be at least 100' 
+      });
+    }
+
+    // Calculate USD amount using same pricing tiers as Stripe
+    const creditsNum = parseInt(credits, 10);
+    const pricePerCredit = getPricePerCreditUSD(creditsNum, 'payment');
+    const usdAmount = Math.round((creditsNum * pricePerCredit) * 100) / 100;
+
+    const currencyLower = String(currency).toLowerCase();
+
+    // Generate unique order ID
+    const orderId = `credits_${userId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Get user email from Clerk (if available)
+    let customerEmail = '';
+    try {
+      const { clerkClient } = require('@clerk/clerk-sdk-node');
+      const user = await clerkClient.users.getUser(userId);
+      customerEmail = user.emailAddresses?.[0]?.emailAddress || '';
+    } catch (error) {
+      logger.warn('Could not fetch user email from Clerk:', error.message);
+    }
+
+    const paymentData = {
+      priceAmount: usdAmount,
+      payCurrency: currencyLower,
+      orderId: orderId,
+      customerEmail: customerEmail,
+      credits: creditsNum
+    };
+
+    const payment = await cryptoService.createPayment(paymentData);
+
+    // Store payment info for webhook processing
+    const webhookEvent = new CryptoWebhookEvent({
+      paymentId: payment.paymentId,
+      orderId: payment.orderId,
+      paymentStatus: payment.paymentStatus,
+      priceAmount: payment.priceAmount,
+      priceCurrency: payment.priceCurrency,
+      payAmount: payment.payAmount,
+      payCurrency: payment.payCurrency,
+      payAddress: payment.payAddress,
+      network: payment.network,
+      userId: userId,
+      credits: creditsNum,
+      processedStatus: 'queued'
+    });
+
+    await webhookEvent.save();
+
+    logger.info(`Crypto payment created for user ${userId}`, {
+      paymentId: payment.paymentId,
+      orderId: payment.orderId,
+      credits: creditsNum,
+      usdAmount: usdAmount,
+      currency: currency
+    });
+
+    res.json({
+      success: true,
+      data: {
+        paymentId: payment.paymentId,
+        paymentUrl: payment.paymentUrl,
+        payAddress: payment.payAddress,
+        payAmount: payment.payAmount,
+        payCurrency: payment.payCurrency,
+        network: payment.network,
+        orderId: payment.orderId,
+        expirationEstimateDate: payment.expirationEstimateDate,
+        credits: creditsNum,
+        usdAmount: usdAmount
+      }
+    });
+
+  } catch (error) {
+    const rawMessage = error.message || 'Failed to create payment';
+    logger.error('Error creating crypto payment:', rawMessage);
+    const lowerMsg = rawMessage.toLowerCase();
+    if (lowerMsg.includes('amountfrom is too small') || 
+        lowerMsg.includes('amountto is too small') || 
+        lowerMsg.includes('is less than minimal')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Entered amount is less than the minimum required, increase number of credits or change currency.'
+      });
+    }
+    res.status(500).json({ success: false, message: rawMessage });
+  }
+});
+
+// GET /crypto/status/:paymentId - Check payment status
+router.get('/crypto/status/:paymentId', requireAuth, async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const userId = req.auth.userId;
+
+    // Verify this payment belongs to the user
+    const webhookEvent = await CryptoWebhookEvent.findOne({ 
+      paymentId: paymentId, 
+      userId: userId 
+    });
+
+    if (!webhookEvent) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Payment not found' 
+      });
+    }
+
+    const paymentStatus = await cryptoService.getPaymentStatus(paymentId);
+
+    if (paymentStatus.paymentStatus === 'finished' && webhookEvent.processedStatus !== 'processed') {
+      try {
+        await processCryptoPayment(webhookEvent);
+      } catch (error) {
+        logger.error('Error processing crypto payment from status check:', error.message);
+      }
+    }
+
+    const refreshedEvent = await CryptoWebhookEvent.findOne({ paymentId: paymentId, userId: userId });
+
+    res.json({
+      success: true,
+      data: {
+        paymentId: paymentStatus.paymentId,
+        paymentStatus: paymentStatus.paymentStatus,
+        payAddress: paymentStatus.payAddress,
+        payAmount: paymentStatus.payAmount,
+        actuallyPaid: paymentStatus.actuallyPaid,
+        payCurrency: paymentStatus.payCurrency,
+        network: paymentStatus.network,
+        txnHash: paymentStatus.txnHash,
+        confirmations: paymentStatus.confirmations,
+        credits: refreshedEvent?.credits || webhookEvent.credits,
+        processed: (refreshedEvent?.processedStatus || webhookEvent.processedStatus) === 'processed',
+        createdAt: paymentStatus.createdAt,
+        updatedAt: paymentStatus.updatedAt
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error checking crypto payment status:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to check payment status' });
+  }
+});
+
+// POST /crypto/webhook - NOWPayments IPN webhook
+router.post('/crypto/webhook', async (req, res) => {
+  try {
+    const signature = req.get('X-NOWPayments-Sig');
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(JSON.stringify(req.body || {}));
+    let paymentData;
+
+    try {
+      paymentData = JSON.parse(rawBody.toString('utf8'));
+    } catch (error) {
+      logger.error('Invalid webhook payload format');
+      return res.status(400).json({ success: false, message: 'Invalid payload format' });
+    }
+
+    // Verify webhook signature
+    if (!cryptoService.verifyIPNSignature(rawBody, signature)) {
+      logger.error('Invalid webhook signature', { paymentId: paymentData.payment_id });
+      return res.status(400).json({ success: false, message: 'Invalid signature' });
+    }
+
+    const paymentId = paymentData.payment_id;
+    
+    // Find existing webhook event
+    let webhookEvent = await CryptoWebhookEvent.findOne({ paymentId: paymentId });
+    
+    if (!webhookEvent) {
+      logger.warn('Webhook received for unknown payment', { paymentId: paymentId });
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    // Update webhook event with latest data
+    webhookEvent.paymentStatus = paymentData.payment_status;
+    webhookEvent.actuallyPaid = paymentData.actually_paid || 0;
+    if (paymentData.outcome) {
+      webhookEvent.outcome = {
+        hash: paymentData.outcome.hash,
+        confirmations: paymentData.outcome.confirmations,
+        amount: paymentData.outcome.amount
+      };
+    }
+
+    await webhookEvent.save();
+
+    // Process completed payments
+    if (paymentData.payment_status === 'finished' && webhookEvent.processedStatus !== 'processed') {
+      try {
+        await processCryptoPayment(webhookEvent);
+        logger.info(`Crypto payment processed successfully`, {
+          paymentId: paymentId,
+          userId: webhookEvent.userId,
+          credits: webhookEvent.credits
+        });
+      } catch (error) {
+        logger.error('Error processing crypto payment:', error.message);
+        await webhookEvent.markAsFailed(error.message);
+      }
+    }
+
+    res.json({ success: true });
+
+  } catch (error) {
+    logger.error('Error handling crypto webhook:', error.message);
+    res.status(500).json({ success: false, message: 'Webhook processing failed' });
+  }
+});
+
+// Helper function to process crypto payment and grant credits
+async function processCryptoPayment(webhookEvent) {
+  try {
+    // Mark as processing to prevent duplicate processing
+    webhookEvent.processedStatus = 'processing';
+    await webhookEvent.save();
+
+    // Grant credits to user
+    await creditService.addCredits(
+      webhookEvent.userId,
+      webhookEvent.credits,
+      'purchase',
+      `crypto:${webhookEvent.paymentId}`,
+      `Crypto payment - ${webhookEvent.credits} credits`,
+      {
+        paymentId: webhookEvent.paymentId,
+        orderId: webhookEvent.orderId,
+        provider: 'crypto',
+        cryptoCurrency: webhookEvent.payCurrency?.toUpperCase(),
+        cryptoAmount: webhookEvent.payAmount,
+        cryptoTxnHash: webhookEvent.outcome?.hash,
+        cryptoNetwork: webhookEvent.network,
+        confirmations: webhookEvent.outcome?.confirmations,
+        usdAmount: webhookEvent.priceAmount
+      }
+    );
+
+    // Mark as processed
+    await webhookEvent.markAsProcessed();
+
+    logger.info(`Credits granted for crypto payment`, {
+      userId: webhookEvent.userId,
+      credits: webhookEvent.credits,
+      paymentId: webhookEvent.paymentId,
+      txnHash: webhookEvent.outcome?.hash
+    });
+
+  } catch (error) {
+    await webhookEvent.markAsFailed(error.message);
+    throw error;
   }
 }
 

@@ -20,6 +20,8 @@ app.get('/health', (req, res) => {
 
 // Stripe webhook requires raw body. Register it before express.json
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), paymentsRoutes.handleStripeWebhook);
+// NOWPayments webhook requires raw body for signature verification
+app.use('/api/payments/crypto/webhook', express.raw({ type: 'application/json' }));
 
 // Middleware
 // Increase JSON body size limit to handle large email validation batches
